@@ -8,7 +8,19 @@ Interactive script to configure new apps or edit existing ones. This script help
 
 ## Quick Start
 
-**Run directly (one-liner):**
+**Recommended: Download and run (most reliable):**
+```bash
+# Download the script
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh
+
+# Make it executable
+chmod +x setup-app.sh
+
+# Run it
+./setup-app.sh
+```
+
+**Alternative: Run directly (may not work in all environments):**
 ```bash
 # Linux/macOS/Git Bash
 curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
@@ -16,6 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/ma
 # Windows PowerShell
 irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 ```
+
+**Note:** If piping doesn't work (script exits immediately), download the script first as shown above.
 
 **Prerequisites:** GitHub CLI (`gh`) must be installed and authenticated. See [Prerequisites](#prerequisites) below.
 
@@ -52,22 +66,29 @@ gh auth login
 
 ## Quick Install & Run
 
-### One-Liner (All Platforms)
+### Download and Run (Recommended)
 
 **Linux/macOS/Git Bash (Windows):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh
+chmod +x setup-app.sh
+./setup-app.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
+irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -OutFile setup-app.sh
+.\setup-app.sh
 ```
 
-**Windows (CMD - requires Git Bash or WSL):**
-```cmd
+### One-Liner (Alternative - may not work in all environments)
+
+**Linux/macOS/Git Bash:**
+```bash
 curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 ```
+
+**Note:** If the script exits immediately when piping, use the download method above instead.
 
 ### Prerequisites
 
