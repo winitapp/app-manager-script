@@ -1,6 +1,10 @@
-# App Configuration Template
+# App Manager Script
 
-Interactive script to configure new apps or edit existing ones. This template helps you manage Kubernetes app configurations, ingress routes, and automatically commits and pushes changes to GitHub.
+Interactive script to configure new apps or edit existing ones. This script helps you manage Kubernetes app configurations, ingress routes, and automatically commits and pushes changes to GitHub.
+
+## Repository
+
+**GitHub**: https://github.com/winit-testabc/app-manager-script
 
 ## Features
 
@@ -21,14 +25,17 @@ Interactive script to configure new apps or edit existing ones. This template he
 
 **Note**: The script will automatically clone the `k8s-production` repository if it doesn't exist locally. You don't need to have it cloned beforehand.
 
+## Installation
+
+Clone the repository:
+```bash
+git clone https://github.com/winit-testabc/app-manager-script.git
+cd app-manager-script
+```
+
 ## Usage
 
-1. Clone or copy this template to your workspace:
-   ```bash
-   cd new-app-template
-   ```
-
-2. Run the setup script:
+Run the setup script:
    ```bash
    ./setup-app.sh [app-name]
    ```
