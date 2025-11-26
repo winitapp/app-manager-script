@@ -1222,15 +1222,23 @@ prompt_environment() {
     done
 }
 
-# Get latest version tag from GitHub
+# Get latest version tag from k8s repository
 get_latest_version() {
-    local repo="\${GITHUB_ORG}/\${APP_NAME}"
     local env_suffix="\${ENV_SUFFIX}"
+    local app_name="${APP_NAME}"
     
-    # Get all tags matching the pattern v*.*.*-{env}
-    local latest_tag=\$(gh api repos/\${repo}/git/refs/tags --jq '.[].ref' 2>/dev/null | \\
-        grep -E "refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-\${env_suffix}\$" | \\
-        sed 's|refs/tags/v||' | sed "s/-\${env_suffix}\$//" | \\
+    # Determine k8s repo based on environment
+    if [ "\$env_suffix" = "staging" ]; then
+        local k8s_repo="\${GITHUB_ORG}/k8s-staging"
+    else
+        local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    fi
+    
+    # Get all tags matching the pattern v*.*.*-{app_name}-{env}
+    # Format: v1.0.0-test3-prod or v1.0.0-test3-staging
+    local latest_tag=\$(gh api repos/\${k8s_repo}/git/refs/tags --jq '.[].ref' 2>/dev/null | \\
+        grep -E "refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-\${app_name}-\${env_suffix}\$" | \\
+        sed "s|refs/tags/v||" | sed "s/-\${app_name}-\${env_suffix}\$//" | \\
         sort -V | tail -1)
     
     if [ -z "\$latest_tag" ]; then
