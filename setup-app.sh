@@ -1208,7 +1208,7 @@ prompt_environment() {
         print_question "Select environment (production/staging) [default: production]: "
         read_input "Select environment (production/staging) [default: production]: " ENV "production"
         
-        ENV=\$(echo "\$ENV" | tr '[:upper:]' '[:lower:]')
+        ENV=\$(echo "\$ENV_INPUT" | tr '[:upper:]' '[:lower:]')
         
         if [ "\$ENV" = "production" ] || [ "\$ENV" = "prod" ]; then
             ENV_SUFFIX="prod"
@@ -1265,11 +1265,11 @@ check_pending_changes() {
         git status --short
         echo ""
         print_question "Do you want to commit these changes before deploying? (Y/n): "
-        read_input COMMIT_CHANGES "Y"
+        read_input "Do you want to commit these changes before deploying? (Y/n): " COMMIT_CHANGES "Y"
         
         if [[ "\$COMMIT_CHANGES" =~ ^[Yy]?\$ ]]; then
             print_question "Enter commit message [default: WIP: prepare for deployment]: "
-            read_input COMMIT_MSG "WIP: prepare for deployment"
+            read_input "Enter commit message [default: WIP: prepare for deployment]: " COMMIT_MSG "WIP: prepare for deployment"
             
             git add -A
             git commit -m "\$COMMIT_MSG" || {
@@ -1278,7 +1278,7 @@ check_pending_changes() {
             }
             
             print_question "Do you want to push these changes? (Y/n): "
-            read_input PUSH_CHANGES "Y"
+            read_input "Do you want to push these changes? (Y/n): " PUSH_CHANGES "Y"
             
             if [[ "\$PUSH_CHANGES" =~ ^[Yy]?\$ ]]; then
                 git push || {
@@ -1299,10 +1299,10 @@ prompt_version() {
     
     print_info "Latest version for \${ENV_SUFFIX}: v\${latest_version}"
     print_question "Enter version number [default: \${suggested_version}]: "
-    read_input "Enter version number [default: \${suggested_version}]: " VERSION "\$suggested_version"
+    read_input "Enter version number [default: \${suggested_version}]: " VERSION_INPUT "\$suggested_version"
     
     # Remove 'v' prefix if present
-    VERSION=\$(echo "\$VERSION" | sed 's/^v//')
+    VERSION=\$(echo "\$VERSION_INPUT" | sed 's/^v//')
     
     # Validate version format (basic check)
     if [[ ! "\$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
