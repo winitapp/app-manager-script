@@ -1323,24 +1323,40 @@ prompt_version() {
 
 # Monitor deployment workflow
 monitor_deployment() {
-    local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    local env_suffix="\${ENV_SUFFIX}"
+    local app_name="${APP_NAME}"
+    
+    # Determine k8s repo based on environment
+    if [ "\$env_suffix" = "staging" ]; then
+        local k8s_repo="\${GITHUB_ORG}/k8s-staging"
+    else
+        local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    fi
+    
     local workflow_file="deploy-from-tag.yml"
     
     print_info "Monitoring deployment workflow..."
+    print_info "Repository: \$k8s_repo"
+    print_info "Workflow: \$workflow_file"
     echo ""
     
     # Wait a moment for the workflow to start
-    sleep 2
+    sleep 3
     
-    # Get the latest workflow run
+    # Get the latest workflow run (most recent one)
     local run_id=\$(gh run list --repo "\$k8s_repo" --workflow "\$workflow_file" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
     
     if [ -z "\$run_id" ] || [ "\$run_id" = "null" ]; then
         print_warning "Could not find workflow run. You can monitor manually:"
         echo "  gh run list --repo \$k8s_repo --workflow \$workflow_file"
+        echo ""
+        echo "Or view actions at:"
+        echo "  https://github.com/\$k8s_repo/actions"
         return 0
     fi
     
+    local run_url="https://github.com/\$k8s_repo/actions/runs/\$run_id"
+    print_info "Workflow run URL: \$run_url"
     print_info "Watching workflow run #\${run_id}"
     echo ""
     
@@ -1348,10 +1364,15 @@ monitor_deployment() {
     gh run watch "\$run_id" --repo "\$k8s_repo" --exit-status
     
     local exit_code=\$?
+    echo ""
     if [ \$exit_code -eq 0 ]; then
         print_success "Deployment completed successfully!"
+        echo ""
+        print_info "View workflow run: \$run_url"
     else
         print_error "Deployment failed with exit code \$exit_code"
+        echo ""
+        print_info "View workflow run: \$run_url"
         exit \$exit_code
     fi
 }
