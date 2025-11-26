@@ -1,353 +1,156 @@
 # App Manager Script
 
-Interactive script to configure new apps or edit existing ones. This script helps you manage Kubernetes app configurations, ingress routes, and automatically commits and pushes changes to GitHub.
+Interactive script to configure Kubernetes apps, manage ingress routes, and deploy applications.
 
-## Repository
-
-**GitHub**: https://github.com/winit-testabc/app-manager-script (Public)
+**Repository**: https://github.com/winit-testabc/app-manager-script (Public)
 
 ## Quick Start
 
-**One-liner (download, chmod, run):**
-```bash
-# Linux/macOS/Git Bash
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh && chmod +x setup-app.sh && ./setup-app.sh
+### One-Liners (Copy & Paste)
 
-# Windows PowerShell
+**Linux/macOS/Git Bash:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh && chmod +x setup-app.sh && ./setup-app.sh
+```
+
+**Windows PowerShell:**
+```powershell
 irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -OutFile setup-app.sh; if ($?) { chmod +x setup-app.sh; ./setup-app.sh }
 ```
 
-**Alternative: Download and run separately:**
-```bash
-# Download the script
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh
-
-# Make it executable
-chmod +x setup-app.sh
-
-# Run it
-./setup-app.sh
+**Windows CMD:**
+```cmd
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh && chmod +x setup-app.sh && setup-app.sh
 ```
-
-**Note:** The one-liner downloads the script first, which ensures proper terminal access for interactive input.
-
-**Prerequisites:** GitHub CLI (`gh`) must be installed and authenticated. See [Prerequisites](#prerequisites) below.
-
-## Features
-
-- ✅ **Edit existing apps** - Modify replicas, resources, ports, ingress routes
-- ✅ **Create new apps** - Set up complete Kubernetes manifests
-- ✅ **Create app repositories** - Automatically creates GitHub repo for app source code
-- ✅ **Ingress management** - Add, remove, or edit ingress routes interactively
-- ✅ **Auto-commit & push** - Automatically commits and pushes changes to GitHub
-- ✅ **Menu-driven interface** - Easy-to-use menu system
-- ✅ **Environment support** - Configure for production or staging
-- ✅ **Validates inputs** - Provides sensible defaults and validation
 
 ## Prerequisites
 
 - **GitHub CLI (`gh`)** installed and authenticated
 - Access to the `winit-testabc` GitHub organization
-- Write access to the `k8s-production` repository
 
-**Note**: The script will automatically clone the `k8s-production` repository if it doesn't exist locally. You don't need to have it cloned beforehand.
-
-### Quick Setup
+**Install GitHub CLI:**
 
 ```bash
-# Install GitHub CLI (if not installed)
-# macOS: brew install gh
-# Linux: apt install gh  # or yum install gh
-# Windows: winget install GitHub.cli
-
-# Authenticate (one-time)
-gh auth login
-```
-
-## Quick Install & Run
-
-### One-Liner (Recommended)
-
-**Linux/macOS/Git Bash:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh && chmod +x setup-app.sh && ./setup-app.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -OutFile setup-app.sh; if ($?) { chmod +x setup-app.sh; ./setup-app.sh }
-```
-
-### Download and Run Separately
-
-**Linux/macOS/Git Bash:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh
-chmod +x setup-app.sh
-./setup-app.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -OutFile setup-app.sh
-chmod +x setup-app.sh
-.\setup-app.sh
-```
-
-### Prerequisites
-
-The script requires **GitHub CLI (`gh`)** to be installed and authenticated:
-
-**macOS:**
-```bash
+# macOS
 brew install gh
-gh auth login
-```
 
-**Linux (Debian/Ubuntu):**
-```bash
+# Linux (Debian/Ubuntu)
 sudo apt install gh
-gh auth login
-```
 
-**Linux (RHEL/CentOS/Fedora):**
-```bash
+# Linux (RHEL/CentOS/Fedora)
 sudo yum install gh  # or sudo dnf install gh
-gh auth login
-```
 
-**Windows:**
-```powershell
+# Windows
 winget install GitHub.cli
-gh auth login
 ```
 
-### Alternative: Clone and Run
+**Authenticate:**
 
 ```bash
-git clone https://github.com/winit-testabc/app-manager-script.git
-cd app-manager-script
-./setup-app.sh
+gh auth login
 ```
+
+## Features
+
+- ✅ **Create new apps** - Set up complete Kubernetes manifests
+- ✅ **Edit existing apps** - Modify replicas, resources, ports, ingress routes
+- ✅ **Create app repositories** - Automatically creates GitHub repo for app source code
+- ✅ **Ingress management** - Add, remove, or edit ingress routes interactively
+- ✅ **View configuration** - See current app settings in a formatted table
+- ✅ **Get deploy script** - Generate a custom deployment script for your app
+- ✅ **Auto-commit & push** - Automatically commits and pushes changes to GitHub
+- ✅ **Environment support** - Configure for production or staging
 
 ## Usage
 
-Run the setup script:
+Run the script and follow the interactive menu:
+
 ```bash
 ./setup-app.sh
 ```
 
-The script will prompt you for the app name. It will edit the app if it exists, or create a new one.
+**Menu Options:**
+1. **Configure app settings** - Set replicas, CPU, memory, container port, environment
+2. **Manage ingress routes** - Add or remove domain-to-port mappings
+3. **View current configuration** - Display current settings in a table format
+4. **Get deploy script** - Generate a custom deployment script (see below)
+5. **Save and push changes** - Commit and push to GitHub
+6. **Exit without saving**
 
-3. Use the interactive menu:
-   - **Option 1**: Configure app settings (replicas, resources, port, environment)
-   - **Option 2**: Manage ingress routes (add/remove domains)
-   - **Option 3**: Save and push changes to GitHub
-   - **Option 4**: Exit without saving
+## Deploy Script
 
-### Editing Existing Apps
+The **"Get deploy script"** option generates a custom deployment script (`{app-name}-deploy.sh`) for your app. This script:
 
-When editing an existing app, the script will:
-- Show current configuration values
-- Allow you to press Enter to keep existing values
-- Only update what you change
+- **Prompts for environment** (production/staging)
+- **Auto-detects latest version** from existing tags in the k8s repository
+- **Suggests next version** (auto-increments patch version)
+- **Checks for pending changes** and asks if you want to commit them
+- **Triggers deployment workflow** in the k8s repository
+- **Monitors deployment progress** and shows workflow status
 
-### Managing Ingress Routes
+**Usage:**
+```bash
+./{app-name}-deploy.sh
+```
 
-The ingress management menu allows you to:
-- **Add routes**: Configure new domain-to-port mappings
-- **Remove routes**: Delete existing ingress routes
-- Routes are automatically added to the correct namespace section (production/staging)
+The script is pre-configured with your app name and will guide you through the deployment process interactively.
 
 ## What It Does
 
-### 1. Clones k8s-production Repository
-- Automatically clones `winit-testabc/k8s-production` if it doesn't exist locally
-- Updates it if it already exists
-- Uses GitHub CLI (`gh`) for all repository operations
+1. **Clones/updates k8s repository** - Automatically manages `k8s-production` or `k8s-staging`
+2. **Creates/updates Kubernetes manifests** - Generates Deployment and Service YAML files
+3. **Manages ingress routes** - Adds domain routes to Cloudflare Tunnel ingress configuration
+4. **Creates app source repository** - Sets up GitHub repo for your app code (if new app)
+5. **Commits and pushes** - Automatically commits all changes and pushes to GitHub
 
-### 2. Detects Existing Apps
-- Checks if app already exists
-- Shows current configuration when editing
-- Allows incremental updates (only change what you want)
-
-### 2a. Creates App Source Repository (New Apps Only)
-- Creates `winit-testabc/{app-name}-main` repository if it doesn't exist
-- Initializes with basic README.md and .gitignore
-- Pushes initial commit to GitHub
-- Sets repository as private by default
-
-### 3. Creates/Updates Kubernetes Manifests
-Creates or updates files in `k8s-production/apps/{app-name}/`:
-- `{app-name}.yaml` - Deployment and Service manifests
-- `README.md` - Documentation with deployment instructions
-
-**Environment Support**:
-- **Production**: Deploys to `production` namespace
-- **Staging**: Deploys to `staging` namespace
-- Manifests are automatically configured with the correct namespace
-
-### 4. Manages Ingress Routes
-- **Add routes**: Configure domain-to-port mappings
-- **Remove routes**: Delete existing ingress routes
-- Routes are added to `k8s-production/apps/tunnel-ingress/tunnel-ingress.yaml`
-- Routes are added to the appropriate namespace section (production or staging)
-- Creates the staging section automatically if it doesn't exist
-
-### 5. Commits and Pushes Changes
-- Automatically commits all changes to k8s-production
-- Pushes to GitHub repository
-- For new apps, also creates and initializes app source repository
-- No manual git commands needed!
-
-## Example Session
-
-### Creating a New App
+## Example Workflow
 
 ```bash
-$ ./setup-app.sh
+# 1. Run the setup script
+./setup-app.sh
 
-============================================================================
-🚀 App Configuration Script
-============================================================================
-
+# 2. Enter app name when prompted
 ? Enter app name: payment-service
-ℹ App 'payment-service' not found (new app)
 
-============================================================================
-Configure New App: payment-service
-============================================================================
-
-→ 1. Configure app settings (replicas, resources, port)
-→ 2. Manage ingress routes
-→ 3. Save and push changes to GitHub
-→ 4. Exit without saving
-
-? Choose an option: 1
-
-? Configure for which environment? (production/staging) [default: production]: production
+# 3. Configure app settings (Option 1)
+? Configure for which environment? (production/staging): production
 ? Enter number of replicas [default: 1]: 2
 ? Enter memory request [default: 256Mi]: 512Mi
-? Enter memory limit [default: 512Mi]: 1Gi
-? Enter CPU request [default: 100m]: 200m
-? Enter CPU limit [default: 250m]: 500m
-? Enter container port [default: 3000]: 3000
-✅ Created/updated k8s-production/apps/payment-service/payment-service.yaml
-✅ Created/updated README
+...
 
-? Choose an option: 2
+# 4. Add ingress routes (Option 2)
+? Enter domain name: api-payment.winit.dev
+? Enter local port [default: 3000]: 3000
 
-============================================================================
-Ingress Routes Management for payment-service
-============================================================================
-No ingress routes configured.
-
-→ 1. Add ingress route
-→ 2. Remove ingress route
-→ 3. Done with ingress configuration
-
-? Choose an option: 1
-
-? Enter domain name (e.g., myapp.winit.dev): api-payment.winit.dev
-? Enter local port for api-payment.winit.dev [default: 3000]: 3000
-✅ Added ingress route: api-payment.winit.dev -> payment-service:3000
-
-? Choose an option: 3
-
-? Choose an option: 3
-
-ℹ Committing changes...
+# 5. Save and push (Option 5)
 ✅ Changes pushed to GitHub
-ℹ Checking for app source repository: winit-testabc/payment-service-main
-? Create new GitHub repository 'winit-testabc/payment-service-main' for app source code? (Y/n): y
-ℹ Creating repository: winit-testabc/payment-service-main
-✅ Created repository: winit-testabc/payment-service-main
-ℹ Initializing repository with basic structure...
-✅ Repository initialized and pushed to GitHub
-ℹ Repository URL: https://github.com/winit-testabc/payment-service-main
-✅ Configuration complete!
+
+# 6. Get deploy script (Option 4)
+✅ Created deploy script: payment-service-deploy.sh
+
+# 7. Deploy your app
+./payment-service-deploy.sh
 ```
 
-### Editing an Existing App
+## After Configuration
 
-```bash
-$ ./setup-app.sh
+- ✅ ArgoCD automatically syncs changes
+- ✅ Your app is deployed/updated in Kubernetes
+- ✅ Ingress routes become active (if configured)
 
-============================================================================
-🚀 App Configuration Script
-============================================================================
-
-? Enter app name: payment-service
-✅ App 'payment-service' found (existing app)
-
-Current configuration:
-  Environment: production (namespace: production)
-  Replicas: 2
-  Container Port: 3000
-  Resources: 512Mi/1Gi memory, 200m/500m CPU
-
-? Choose an option: 1
-
-? Environment [current: production] (press Enter to keep, or enter new): 
-? Number of replicas [current: 2] (press Enter to keep): 3
-✅ Created/updated k8s-production/apps/payment-service/payment-service.yaml
-
-? Choose an option: 3
-✅ Changes pushed to GitHub
-```
-
-## Generated Manifest Structure
-
-The script generates a standard Kubernetes manifest with:
-
-- **Deployment**: Configured with your specified replicas, resources, and port
-- **Service**: ClusterIP service exposing your container port
-- **Health Checks**: Standard liveness and readiness probes
-- **Labels**: Properly labeled for Fargate and ArgoCD discovery
-
-## What Happens After Configuration
-
-The script automatically:
-1. ✅ Creates/updates Kubernetes manifests
-2. ✅ Updates ingress routes
-3. ✅ Commits changes to git
-4. ✅ Pushes to GitHub
-
-**No manual git commands needed!**
-
-After the script completes:
-- ArgoCD will automatically sync the changes
-- Your app will be deployed/updated in Kubernetes
-- Ingress routes will be active (if configured)
-
-To manually deploy a new version:
-```bash
-./scripts/deploy-app.sh {app-name} v1.0.0-{environment} {GITHUB_ORG}/{app-name}-main
-```
-
-## Notes
-
-- **Automatically commits and pushes** - No manual git commands needed
-- **Edit existing apps** - Shows current values, allows incremental updates
-- **Menu-driven** - Easy to navigate and make changes
-- **Automatically clones k8s-production** if it doesn't exist locally
-- Uses GitHub CLI (`gh`) for all GitHub operations
-- Ingress routes can be added or removed interactively
-- All paths are relative to where you run the script from
-- The script can be run from any directory
+No manual git commands needed!
 
 ## Troubleshooting
 
-**GitHub CLI not authenticated**:
+**GitHub CLI not authenticated:**
 ```bash
 gh auth login
 ```
 
-**Repository creation fails**:
+**Repository creation fails:**
 - Check you have permissions in the `winit-testabc` organization
 - Create the repository manually at: https://github.com/organizations/winit-testabc/repositories/new
 
-**Ingress file not found**:
-- Ensure you're running from the correct directory
-- Check that `k8s-production/apps/tunnel-ingress/tunnel-ingress.yaml` exists
-
+**Script hangs:**
+- Make sure you downloaded the script first (don't pipe directly to bash)
+- Use the one-liner which downloads before executing
