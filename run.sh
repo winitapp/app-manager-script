@@ -16,6 +16,6 @@ curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
 chmod +x "$TEMP_SCRIPT"
 
 echo "Running script..."
-# Execute with stdin from terminal (not from pipe)
-exec "$TEMP_SCRIPT" < /dev/tty
+# Execute the script (read_input function will handle terminal reading)
+exec "$TEMP_SCRIPT"
 
