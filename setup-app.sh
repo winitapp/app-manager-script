@@ -148,9 +148,19 @@ check_app_exists() {
         APP_EXISTS=true
         # Extract current values from manifest
         extract_current_values
+        print_success "App '$APP_NAME' found (existing app)"
+        echo ""
+        echo "Current configuration:"
+        echo "  Environment: $ENVIRONMENT (namespace: $NAMESPACE)"
+        echo "  Replicas: $REPLICAS"
+        echo "  Container Port: $CONTAINER_PORT"
+        echo "  Resources: ${MEMORY_REQUEST}/${MEMORY_LIMIT} memory, ${CPU_REQUEST}/${CPU_LIMIT} CPU"
+        echo ""
         return 0
+    else
+        print_info "App '$APP_NAME' not found (new app)"
+        return 1
     fi
-    return 1
 }
 
 # Extract current values from existing manifest
@@ -198,21 +208,6 @@ prompt_app_name() {
         
         break
     done
-    
-    MANIFEST_FILE="${K8S_DIR}/${APP_NAME}/${APP_NAME}.yaml"
-    
-    if check_app_exists; then
-        print_success "App '$APP_NAME' found (existing app)"
-        echo ""
-        echo "Current configuration:"
-        echo "  Environment: $ENVIRONMENT (namespace: $NAMESPACE)"
-        echo "  Replicas: $REPLICAS"
-        echo "  Container Port: $CONTAINER_PORT"
-        echo "  Resources: ${MEMORY_REQUEST}/${MEMORY_LIMIT} memory, ${CPU_REQUEST}/${CPU_LIMIT} CPU"
-        echo ""
-    else
-        print_info "App '$APP_NAME' not found (new app)"
-    fi
 }
 
 # Prompt for environment
