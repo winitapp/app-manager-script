@@ -1237,10 +1237,11 @@ get_latest_version() {
     # Get all tags matching the pattern v*.*.*-{app_name}-{env}
     # Format: v1.0.0-test3-prod or v1.0.0-test3-staging
     # Use gh api to get tags and filter properly
+    # Note: app_name and env_suffix are local variables, so we use \$app_name (not \${app_name})
     local latest_version=\$(gh api repos/\${k8s_repo}/git/refs/tags --jq ".[].ref" 2>/dev/null | \\
-        grep -E "refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-\${app_name}-\${env_suffix}\$" | \\
+        grep -E "refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-\$app_name-\$env_suffix\$" | \\
         sed "s|refs/tags/v||" | \\
-        sed "s/-\${app_name}-\${env_suffix}\$//" | \\
+        sed "s/-\$app_name-\$env_suffix\$//" | \\
         sort -V -t. -k1,1n -k2,2n -k3,3n | \\
         tail -1)
     
