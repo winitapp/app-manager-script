@@ -34,9 +34,24 @@ read_input() {
     if [ -t 0 ]; then
         # stdin is a terminal, read normally
         read -r "$@"
-    else
-        # stdin is piped, read from /dev/tty
+    elif [ -e /dev/tty ] && [ -r /dev/tty ]; then
+        # stdin is piped, but /dev/tty exists and is readable
         read -r "$@" < /dev/tty
+    else
+        # /dev/tty not available, try to read from stderr's terminal
+        # This is a fallback for environments where /dev/tty doesn't work
+        if [ -t 2 ]; then
+            read -r "$@" <&2
+        else
+            # Last resort: try /dev/tty anyway (might work in some cases)
+            read -r "$@" < /dev/tty 2>/dev/null || {
+                print_error "Cannot read from terminal. Please download and run the script:"
+                echo "  curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh"
+                echo "  chmod +x setup-app.sh"
+                echo "  ./setup-app.sh"
+                exit 1
+            }
+        fi
     fi
 }
 
@@ -919,14 +934,16 @@ main() {
     echo ""
     
     # Check if we can read from terminal (for interactive input)
-    if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
-        print_error "Cannot read from terminal. This script requires interactive input."
+    # This is a pre-check, but read_input() will handle the actual reading
+    if [ ! -t 0 ] && [ ! -e /dev/tty ]; then
+        print_warning "Terminal device (/dev/tty) not found. Interactive input may not work."
         echo ""
-        echo "Please download and run the script instead of piping:"
+        echo "For best results, download and run the script:"
         echo "  curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh"
         echo "  chmod +x setup-app.sh"
         echo "  ./setup-app.sh"
-        exit 1
+        echo ""
+        echo "Continuing anyway..."
     fi
     
     # Check prerequisites
