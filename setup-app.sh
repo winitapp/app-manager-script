@@ -1321,6 +1321,9 @@ prompt_version() {
         exit 1
     fi
     
+    # Tag format: v{VERSION}-{ENV}
+    # The deploy script passes service_name separately to the workflow
+    # Example: v1.0.0-prod
     TAG="v\${VERSION}-\${ENV_SUFFIX}"
 }
 
