@@ -1182,19 +1182,24 @@ read_input() {
     local var_name="\$2"
     local default_value="\$3"
     local input_source="/dev/tty"
+    local user_input=""
     
     if [ -t 0 ]; then
-        read -r -p "\$prompt_text" "\$var_name"
+        read -r -p "\$prompt_text" user_input
     elif [ -e "\$input_source" ] && [ -r "\$input_source" ]; then
-        read -r -p "\$prompt_text" "\$var_name" < "\$input_source"
+        read -r -p "\$prompt_text" user_input < "\$input_source"
     else
         print_error "Cannot read from terminal. Please run the script directly."
         exit 1
     fi
     
-    if [ -z "\${!var_name}" ] && [ -n "\$default_value" ]; then
-        eval "\$var_name=\"\$default_value\""
+    # Use default if input is empty
+    if [ -z "\$user_input" ] && [ -n "\$default_value" ]; then
+        user_input="\$default_value"
     fi
+    
+    # Set the variable using eval (safe because we control the var_name)
+    eval "\$var_name=\"\$user_input\""
 }
 
 # Prompt for environment
