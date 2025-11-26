@@ -1321,10 +1321,14 @@ prompt_version() {
         exit 1
     fi
     
-    # Tag format: v{VERSION}-{ENV}
+    # Tag format for workflow dispatch: v{VERSION}-{ENV}
     # The deploy script passes service_name separately to the workflow
     # Example: v1.0.0-prod
     TAG="v\${VERSION}-\${ENV_SUFFIX}"
+    
+    # Also create a tag on k8s repository for version detection: v{VERSION}-{APP_NAME}-{ENV}
+    # This tag is used by version detection to find the latest version
+    K8S_TAG="v\${VERSION}-${APP_NAME}-\${ENV_SUFFIX}"
 }
 
 # Monitor deployment workflow by run ID
@@ -1442,13 +1446,38 @@ main() {
     echo "\$deploy_output"
     echo ""
     
+    # Create and push tag to k8s repository for version tracking
+    # This allows version detection to work correctly
+    print_info "Creating version tag on k8s repository..."
+    local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    if [ "\${ENV_SUFFIX}" = "staging" ]; then
+        k8s_repo="\${GITHUB_ORG}/k8s-staging"
+    fi
+    
+    # Clone k8s repo temporarily to create tag
+    local temp_dir=\$(mktemp -d)
+    trap "rm -rf \$temp_dir" EXIT
+    
+    if gh repo clone "\$k8s_repo" "\$temp_dir" -- --depth=1 2>/dev/null; then
+        cd "\$temp_dir"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -f "\${K8S_TAG}" 2>/dev/null || git tag "\${K8S_TAG}"
+        git push origin "\${K8S_TAG}" --force 2>/dev/null && \\
+            print_success "Tag \${K8S_TAG} created on \$k8s_repo" || \\
+            print_warning "Failed to push tag (may already exist)"
+        cd - > /dev/null
+    else
+        print_warning "Could not clone \$k8s_repo to create tag"
+    fi
+    
     # Monitor the deployment if we found a run ID
     if [ -n "\$run_id" ]; then
         monitor_deployment_by_id "\$run_id"
     else
         print_warning "Could not extract workflow run ID from output"
         print_info "You can monitor manually:"
-        echo "  gh run list --repo \${GITHUB_ORG}/k8s-production --workflow=deploy-from-tag.yml"
+        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
     fi
 }
 
