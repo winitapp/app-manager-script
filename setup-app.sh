@@ -1217,10 +1217,84 @@ prompt_environment() {
     done
 }
 
-# Prompt for version
+# Get latest version tag from GitHub
+get_latest_version() {
+    local repo="\${GITHUB_ORG}/\${APP_NAME}"
+    local env_suffix="\${ENV_SUFFIX}"
+    
+    # Get all tags matching the pattern v*.*.*-{env}
+    local latest_tag=\$(gh api repos/\${repo}/git/refs/tags --jq '.[].ref' 2>/dev/null | \\
+        grep -E "refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-\${env_suffix}\$" | \\
+        sed 's|refs/tags/v||' | sed "s/-\${env_suffix}\$//" | \\
+        sort -V | tail -1)
+    
+    if [ -z "\$latest_tag" ]; then
+        echo "1.0.0"
+    else
+        echo "\$latest_tag"
+    fi
+}
+
+# Increment version (patch version)
+increment_version() {
+    local version="\$1"
+    local major=\$(echo "\$version" | cut -d. -f1)
+    local minor=\$(echo "\$version" | cut -d. -f2)
+    local patch=\$(echo "\$version" | cut -d. -f3)
+    
+    patch=\$((patch + 1))
+    echo "\${major}.\${minor}.\${patch}"
+}
+
+# Check for pending changes and ask to commit
+check_pending_changes() {
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        return 0
+    fi
+    
+    # Check for uncommitted changes
+    if [ -n "\$(git status --porcelain)" ]; then
+        echo ""
+        print_warning "You have uncommitted changes:"
+        git status --short
+        echo ""
+        print_question "Do you want to commit these changes before deploying? (Y/n): "
+        read_input COMMIT_CHANGES "Y"
+        
+        if [[ "\$COMMIT_CHANGES" =~ ^[Yy]?\$ ]]; then
+            print_question "Enter commit message [default: WIP: prepare for deployment]: "
+            read_input COMMIT_MSG "WIP: prepare for deployment"
+            
+            git add -A
+            git commit -m "\$COMMIT_MSG" || {
+                print_error "Failed to commit changes"
+                exit 1
+            }
+            
+            print_question "Do you want to push these changes? (Y/n): "
+            read_input PUSH_CHANGES "Y"
+            
+            if [[ "\$PUSH_CHANGES" =~ ^[Yy]?\$ ]]; then
+                git push || {
+                    print_error "Failed to push changes"
+                    exit 1
+                }
+                print_success "Changes pushed"
+            fi
+        fi
+    fi
+}
+
+# Prompt for version with auto-increment
 prompt_version() {
-    print_question "Enter version number (e.g., 1.0.0) [default: 1.0.0]: "
-    read_input "Enter version number (e.g., 1.0.0) [default: 1.0.0]: " VERSION "1.0.0"
+    # Get latest version for the selected environment
+    local latest_version=\$(get_latest_version)
+    local suggested_version=\$(increment_version "\$latest_version")
+    
+    print_info "Latest version for \${ENV_SUFFIX}: v\${latest_version}"
+    print_question "Enter version number [default: \${suggested_version}]: "
+    read_input "Enter version number [default: \${suggested_version}]: " VERSION "\$suggested_version"
     
     # Remove 'v' prefix if present
     VERSION=\$(echo "\$VERSION" | sed 's/^v//')
@@ -1234,6 +1308,41 @@ prompt_version() {
     TAG="v\${VERSION}-\${ENV_SUFFIX}"
 }
 
+# Monitor deployment workflow
+monitor_deployment() {
+    local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    local workflow_file="deploy-from-tag.yml"
+    
+    print_info "Monitoring deployment workflow..."
+    echo ""
+    
+    # Wait a moment for the workflow to start
+    sleep 2
+    
+    # Get the latest workflow run
+    local run_id=\$(gh run list --repo "\$k8s_repo" --workflow "\$workflow_file" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    
+    if [ -z "\$run_id" ] || [ "\$run_id" = "null" ]; then
+        print_warning "Could not find workflow run. You can monitor manually:"
+        echo "  gh run list --repo \$k8s_repo --workflow \$workflow_file"
+        return 0
+    fi
+    
+    print_info "Watching workflow run #\${run_id}"
+    echo ""
+    
+    # Watch the workflow run
+    gh run watch "\$run_id" --repo "\$k8s_repo" --exit-status
+    
+    local exit_code=\$?
+    if [ \$exit_code -eq 0 ]; then
+        print_success "Deployment completed successfully!"
+    else
+        print_error "Deployment failed with exit code \$exit_code"
+        exit \$exit_code
+    fi
+}
+
 # Main execution
 main() {
     echo ""
@@ -1241,6 +1350,9 @@ main() {
     echo "🚀 Deploy ${APP_NAME}"
     echo "============================================================================="
     echo ""
+    
+    # Check for pending changes
+    check_pending_changes
     
     prompt_environment
     prompt_version
@@ -1286,8 +1398,15 @@ main() {
     print_info "Running deployment script..."
     echo ""
     
-    # Execute deploy script
-    bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}"
+    # Execute deploy script in background and capture output
+    bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}" &
+    local deploy_pid=\$!
+    
+    # Wait a moment for the workflow to be triggered
+    sleep 3
+    
+    # Monitor the deployment
+    monitor_deployment
 }
 
 main "\$@"
