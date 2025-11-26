@@ -1426,7 +1426,8 @@ main() {
     echo ""
     
     # Execute deploy script and capture output to extract run ID
-    local deploy_output=\$(bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}" 2>&1)
+    # Auto-confirm the prompt by piping 'y' to stdin
+    local deploy_output=\$(echo "y" | bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}" 2>&1)
     local deploy_exit=\$?
     
     # Extract workflow run ID from output (look for "actions/runs/" URL)
@@ -1454,21 +1455,15 @@ main() {
         k8s_repo="\${GITHUB_ORG}/k8s-staging"
     fi
     
-    # Clone k8s repo temporarily to create tag
-    local temp_dir=\$(mktemp -d)
-    trap "rm -rf \$temp_dir" EXIT
-    
-    if gh repo clone "\$k8s_repo" "\$temp_dir" -- --depth=1 2>/dev/null; then
-        cd "\$temp_dir"
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag -f "\${K8S_TAG}" 2>/dev/null || git tag "\${K8S_TAG}"
-        git push origin "\${K8S_TAG}" --force 2>/dev/null && \\
-            print_success "Tag \${K8S_TAG} created on \$k8s_repo" || \\
-            print_warning "Failed to push tag (may already exist)"
-        cd - > /dev/null
+    # Create tag directly using gh CLI (faster than cloning)
+    # This creates a lightweight tag on the k8s repository
+    print_info "Creating version tag \${K8S_TAG} on \$k8s_repo..."
+    if gh api repos/\${k8s_repo}/git/refs -X POST -f ref="refs/tags/\${K8S_TAG}" -f sha="\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha)" 2>/dev/null; then
+        print_success "Tag \${K8S_TAG} created on \$k8s_repo"
+    elif gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} -X PATCH -f sha="\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha)" 2>/dev/null; then
+        print_success "Tag \${K8S_TAG} updated on \$k8s_repo"
     else
-        print_warning "Could not clone \$k8s_repo to create tag"
+        print_warning "Could not create tag \${K8S_TAG} on \$k8s_repo (may need manual creation)"
     fi
     
     # Monitor the deployment if we found a run ID
