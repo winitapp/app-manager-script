@@ -25,22 +25,81 @@ Interactive script to configure new apps or edit existing ones. This script help
 
 **Note**: The script will automatically clone the `k8s-production` repository if it doesn't exist locally. You don't need to have it cloned beforehand.
 
-## Installation
+## Quick Install & Run
 
-Clone the repository:
+### Option 1: Using GitHub CLI (Recommended for Private Repos)
+
+Since the repository is private, use GitHub CLI which handles authentication automatically:
+
+```bash
+# One-time: Install GitHub CLI (if not already installed)
+# macOS: brew install gh
+# Linux: apt install gh  # or yum install gh
+# Windows: winget install GitHub.cli
+
+# One-time: Authenticate (if not already done)
+gh auth login
+
+# Download and run (using installer script)
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/install.sh | bash -s -- [app-name]
+
+# OR clone and run:
+gh repo clone winit-testabc/app-manager-script
+cd app-manager-script
+./setup-app.sh [app-name]
+```
+
+### Option 2: Using curl with GitHub Token
+
+If you have a GitHub Personal Access Token:
+
+```bash
+# Set your token (one-time, add to ~/.bashrc or ~/.zshrc)
+export GITHUB_TOKEN=ghp_your_token_here
+
+# Run directly
+curl -H "Authorization: token $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
+
+# Or download first, then run
+curl -H "Authorization: token $GITHUB_TOKEN" \
+  -o setup-app.sh \
+  https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh
+chmod +x setup-app.sh
+./setup-app.sh [app-name]
+```
+
+**To create a GitHub token:**
+1. Go to: https://github.com/settings/tokens
+2. Click "Generate new token (classic)"
+3. Select scopes: `repo` (for private repos)
+4. Copy the token
+
+### Option 3: Clone Repository (Traditional)
+
 ```bash
 git clone https://github.com/winit-testabc/app-manager-script.git
 cd app-manager-script
+./setup-app.sh [app-name]
+```
+
+### Option 4: Make Repository Public (Simplest)
+
+If security isn't a concern, make the repository public, then you can use:
+
+```bash
+# Simple one-liner (no authentication needed)
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
 ```
 
 ## Usage
 
 Run the setup script:
-   ```bash
-   ./setup-app.sh [app-name]
-   ```
-   
-   If you provide an app name, it will edit that app if it exists, or create a new one.
+```bash
+./setup-app.sh [app-name]
+```
+
+If you provide an app name, it will edit that app if it exists, or create a new one.
 
 3. Use the interactive menu:
    - **Option 1**: Configure app settings (replicas, resources, port, environment)
