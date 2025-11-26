@@ -11,10 +11,10 @@ Interactive script to configure new apps or edit existing ones. This script help
 **Run directly (one-liner):**
 ```bash
 # Linux/macOS/Git Bash
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 
 # Windows PowerShell
-irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
+irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 ```
 
 **Prerequisites:** GitHub CLI (`gh`) must be installed and authenticated. See [Prerequisites](#prerequisites) below.
@@ -56,17 +56,17 @@ gh auth login
 
 **Linux/macOS/Git Bash (Windows):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
+irm https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 ```
 
 **Windows (CMD - requires Git Bash or WSL):**
 ```cmd
-curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash -s -- [app-name]
+curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh | bash
 ```
 
 ### Prerequisites
@@ -102,17 +102,17 @@ gh auth login
 ```bash
 git clone https://github.com/winit-testabc/app-manager-script.git
 cd app-manager-script
-./setup-app.sh [app-name]
+./setup-app.sh
 ```
 
 ## Usage
 
 Run the setup script:
 ```bash
-./setup-app.sh [app-name]
+./setup-app.sh
 ```
 
-If you provide an app name, it will edit that app if it exists, or create a new one.
+The script will prompt you for the app name. It will edit the app if it exists, or create a new one.
 
 3. Use the interactive menu:
    - **Option 1**: Configure app settings (replicas, resources, port, environment)
@@ -180,12 +180,13 @@ Creates or updates files in `k8s-production/apps/{app-name}/`:
 ### Creating a New App
 
 ```bash
-$ ./setup-app.sh payment-service
+$ ./setup-app.sh
 
 ============================================================================
 🚀 App Configuration Script
 ============================================================================
 
+? Enter app name: payment-service
 ℹ App 'payment-service' not found (new app)
 
 ============================================================================
@@ -245,8 +246,13 @@ No ingress routes configured.
 ### Editing an Existing App
 
 ```bash
-$ ./setup-app.sh payment-service
+$ ./setup-app.sh
 
+============================================================================
+🚀 App Configuration Script
+============================================================================
+
+? Enter app name: payment-service
 ✅ App 'payment-service' found (existing app)
 
 Current configuration:

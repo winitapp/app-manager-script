@@ -38,7 +38,7 @@ if command -v gh &> /dev/null && gh auth status &> /dev/null; then
         if [ -f "setup-app.sh" ]; then
             chmod +x setup-app.sh
             print_success "Script downloaded successfully"
-            exec ./setup-app.sh "$@"
+            exec ./setup-app.sh
         else
             print_error "Script not found"
             exit 1
@@ -59,7 +59,7 @@ elif [ -n "$GITHUB_TOKEN" ]; then
         -o "$TEMP_FILE" 2>/dev/null; then
         chmod +x "$TEMP_FILE"
         print_success "Script downloaded successfully"
-        exec "$TEMP_FILE" "$@"
+        exec "$TEMP_FILE"
     else
         print_error "Failed to download script"
         print_info "Make sure GITHUB_TOKEN is set and has 'repo' scope"

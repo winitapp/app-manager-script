@@ -8,7 +8,7 @@
 # Commits and pushes changes to GitHub
 #
 # Usage:
-#   ./setup-app.sh [app-name]
+#   ./setup-app.sh
 # ============================================================================
 
 set -e
@@ -141,26 +141,22 @@ extract_current_values() {
 
 # Prompt for app name
 prompt_app_name() {
-    if [ -n "$1" ]; then
-        APP_NAME="$1"
-    else
-        while true; do
-            print_question "Enter app name:"
-            read -r APP_NAME
-            
-            if [ -z "$APP_NAME" ]; then
-                print_error "App name cannot be empty"
-                continue
-            fi
-            
-            if [[ ! "$APP_NAME" =~ ^[a-z0-9-]+$ ]]; then
-                print_error "App name must be lowercase alphanumeric with hyphens only"
-                continue
-            fi
-            
-            break
-        done
-    fi
+    while true; do
+        print_question "Enter app name:"
+        read -r APP_NAME
+        
+        if [ -z "$APP_NAME" ]; then
+            print_error "App name cannot be empty"
+            continue
+        fi
+        
+        if [[ ! "$APP_NAME" =~ ^[a-z0-9-]+$ ]]; then
+            print_error "App name must be lowercase alphanumeric with hyphens only"
+            continue
+        fi
+        
+        break
+    done
     
     MANIFEST_FILE="${K8S_DIR}/${APP_NAME}/${APP_NAME}.yaml"
     
@@ -918,7 +914,7 @@ main() {
     setup_k8s_repo
     
     # Get app name
-    prompt_app_name "$1"
+    prompt_app_name
     
     # Show main menu
     main_menu
