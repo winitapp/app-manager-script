@@ -1118,6 +1118,185 @@ commit_and_push() {
     fi
 }
 
+# Write deploy.sh script to local filesystem
+write_deploy_script() {
+    local deploy_script_path="${APP_NAME}-deploy.sh"
+    
+    print_info "Writing deploy.sh script to: ${deploy_script_path}"
+    
+    cat > "$deploy_script_path" <<DEPLOY_EOF
+#!/bin/bash
+
+# ============================================================================
+# Deploy Script for ${APP_NAME}
+# ============================================================================
+# This script helps you deploy ${APP_NAME} by prompting for version and environment.
+# It calls the deployment workflow in the k8s repository.
+#
+# Usage:
+#   ./${deploy_script_path}
+#
+# Requirements:
+#   - GitHub CLI (gh) installed and authenticated
+#   - Access to the k8s repository
+# ============================================================================
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Hardcoded app name
+APP_NAME="${APP_NAME}"
+SOURCE_REPO="${GITHUB_ORG}/${APP_NAME}"
+GITHUB_ORG="${GITHUB_ORG}"
+
+# Function to print colored output
+print_info() {
+    echo -e "\${BLUE}ℹ\${NC} \$1"
+}
+
+print_success() {
+    echo -e "\${GREEN}✅\${NC} \$1"
+}
+
+print_warning() {
+    echo -e "\${YELLOW}⚠️\${NC} \$1"
+}
+
+print_error() {
+    echo -e "\${RED}❌\${NC} \$1"
+}
+
+print_question() {
+    echo -e "\${YELLOW}?\${NC} \$1"
+}
+
+# Function to read input (handles piped input)
+read_input() {
+    local prompt_text="\$1"
+    local var_name="\$2"
+    local default_value="\$3"
+    local input_source="/dev/tty"
+    
+    if [ -t 0 ]; then
+        read -r -p "\$prompt_text" "\$var_name"
+    elif [ -e "\$input_source" ] && [ -r "\$input_source" ]; then
+        read -r -p "\$prompt_text" "\$var_name" < "\$input_source"
+    else
+        print_error "Cannot read from terminal. Please run the script directly."
+        exit 1
+    fi
+    
+    if [ -z "\${!var_name}" ] && [ -n "\$default_value" ]; then
+        eval "\$var_name=\"\$default_value\""
+    fi
+}
+
+# Prompt for environment
+prompt_environment() {
+    while true; do
+        print_question "Select environment (production/staging) [default: production]: "
+        read_input "Select environment (production/staging) [default: production]: " ENV "production"
+        
+        ENV=\$(echo "\$ENV" | tr '[:upper:]' '[:lower:]')
+        
+        if [ "\$ENV" = "production" ] || [ "\$ENV" = "prod" ]; then
+            ENV_SUFFIX="prod"
+            break
+        elif [ "\$ENV" = "staging" ] || [ "\$ENV" = "stage" ]; then
+            ENV_SUFFIX="staging"
+            break
+        else
+            print_error "Invalid environment. Please enter 'production' or 'staging'."
+        fi
+    done
+}
+
+# Prompt for version
+prompt_version() {
+    print_question "Enter version number (e.g., 1.0.0) [default: 1.0.0]: "
+    read_input "Enter version number (e.g., 1.0.0) [default: 1.0.0]: " VERSION "1.0.0"
+    
+    # Remove 'v' prefix if present
+    VERSION=\$(echo "\$VERSION" | sed 's/^v//')
+    
+    # Validate version format (basic check)
+    if [[ ! "\$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+        print_error "Invalid version format. Expected format: X.Y.Z (e.g., 1.0.0)"
+        exit 1
+    fi
+    
+    TAG="v\${VERSION}-\${ENV_SUFFIX}"
+}
+
+# Main execution
+main() {
+    echo ""
+    echo "============================================================================="
+    echo "🚀 Deploy ${APP_NAME}"
+    echo "============================================================================="
+    echo ""
+    
+    prompt_environment
+    prompt_version
+    
+    echo ""
+    print_info "Deployment details:"
+    echo "  App: ${APP_NAME}"
+    echo "  Version: \${TAG}"
+    echo "  Environment: \${ENV_SUFFIX}"
+    echo "  Source Repo: ${SOURCE_REPO}"
+    echo ""
+    
+    # Find WinIT-DO directory (assumes app repo is cloned alongside WinIT-DO)
+    SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Try common locations for WinIT-DO
+    WINIT_DO_DIRS=(
+        "\$(dirname "\$SCRIPT_DIR")/WinIT-DO"
+        "\$(dirname "\$(dirname "\$SCRIPT_DIR")")/WinIT-DO"
+        "\$HOME/WinIT-DO"
+        "."
+    )
+    
+    DEPLOY_SCRIPT=""
+    for dir in "\${WINIT_DO_DIRS[@]}"; do
+        if [ -f "\$dir/scripts/deploy-app.sh" ]; then
+            DEPLOY_SCRIPT="\$dir/scripts/deploy-app.sh"
+            break
+        fi
+    done
+    
+    if [ -z "\$DEPLOY_SCRIPT" ] || [ ! -f "\$DEPLOY_SCRIPT" ]; then
+        print_error "Could not find deploy-app.sh script"
+        print_info ""
+        print_info "Please ensure WinIT-DO repository is cloned and accessible."
+        print_info ""
+        print_info "You can deploy manually using:"
+        echo "  cd WinIT-DO"
+        echo "  ./scripts/deploy-app.sh ${APP_NAME} \${TAG} ${SOURCE_REPO}"
+        exit 1
+    fi
+    
+    print_info "Running deployment script..."
+    echo ""
+    
+    # Execute deploy script
+    bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}"
+}
+
+main "\$@"
+DEPLOY_EOF
+    
+    chmod +x "$deploy_script_path"
+    print_success "Created deploy script: ${deploy_script_path}"
+}
+
 # Show usage information
 show_usage_info() {
     echo ""
@@ -1134,8 +1313,7 @@ show_usage_info() {
     echo ""
     echo "   Option 1: Use the deploy.sh script (recommended)"
     echo "   ------------------------------------------------"
-    echo "   cd ${GITHUB_ORG}/${APP_NAME}"
-    echo "   ./deploy.sh"
+    echo "   ./${APP_NAME}-deploy.sh"
     echo ""
     echo "   This will prompt you for:"
     echo "   - Environment (production/staging)"
@@ -1192,6 +1370,7 @@ main_menu() {
                 commit_and_push
                 echo ""
                 print_success "Configuration complete!"
+                write_deploy_script
                 show_usage_info
                 break
                 ;;
