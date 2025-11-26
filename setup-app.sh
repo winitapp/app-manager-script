@@ -826,30 +826,25 @@ commit_and_push() {
     # Add all modified files
     FILES_TO_ADD=()
     
-    # Add app directory if it exists and has changes
+    # Add app directory and YAML file if they exist
     if [ -d "apps/${APP_NAME}" ]; then
-        # Check if any files in the directory have changed or are new
-        HAS_CHANGES=false
-        
-        # Check for modified tracked files
-        if ! git diff --quiet "apps/${APP_NAME}" 2>/dev/null; then
-            HAS_CHANGES=true
+        # Always add the app directory (git add will handle what's changed)
+        # This ensures YAML files, README, and any other files are included
+        FILES_TO_ADD+=("apps/${APP_NAME}/")
+    fi
+    
+    # Explicitly add the YAML file if it exists (even if directory was already added)
+    if [ -f "apps/${APP_NAME}/${APP_NAME}.yaml" ]; then
+        # Check if it's modified or untracked
+        if ! git diff --quiet "apps/${APP_NAME}/${APP_NAME}.yaml" 2>/dev/null || [ -z "$(git ls-files "apps/${APP_NAME}/${APP_NAME}.yaml" 2>/dev/null)" ]; then
+            FILES_TO_ADD+=("apps/${APP_NAME}/${APP_NAME}.yaml")
         fi
-        
-        # Check for untracked files
-        if [ -n "$(git ls-files --others --exclude-standard "apps/${APP_NAME}")" ]; then
-            HAS_CHANGES=true
-        fi
-        
-        # Check if the YAML file exists and is modified
-        if [ -f "apps/${APP_NAME}/${APP_NAME}.yaml" ]; then
-            if ! git diff --quiet "apps/${APP_NAME}/${APP_NAME}.yaml" 2>/dev/null || [ -z "$(git ls-files "apps/${APP_NAME}/${APP_NAME}.yaml" 2>/dev/null)" ]; then
-                HAS_CHANGES=true
-            fi
-        fi
-        
-        if [ "$HAS_CHANGES" = true ]; then
-            FILES_TO_ADD+=("apps/${APP_NAME}/")
+    fi
+    
+    # Also add README if it exists
+    if [ -f "apps/${APP_NAME}/README.md" ]; then
+        if ! git diff --quiet "apps/${APP_NAME}/README.md" 2>/dev/null || [ -z "$(git ls-files "apps/${APP_NAME}/README.md" 2>/dev/null)" ]; then
+            FILES_TO_ADD+=("apps/${APP_NAME}/README.md")
         fi
     fi
     
@@ -880,12 +875,15 @@ commit_and_push() {
     # Add files
     print_info "Staging changes..."
     for file in "${FILES_TO_ADD[@]}"; do
-        git add "$file"
-        print_info "  Added: $file"
+        if git add "$file" 2>/dev/null; then
+            print_info "  Added: $file"
+        else
+            print_warning "  Could not add: $file (may not exist or already staged)"
+        fi
     done
     
-    # Also add any other modified files
-    git add -u 2>/dev/null || true
+    # Also add any other modified files in the apps directory
+    git add -u apps/ 2>/dev/null || true
     
     # Check if there's anything to commit
     if git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
