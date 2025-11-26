@@ -1293,8 +1293,15 @@ main() {
 main "\$@"
 DEPLOY_EOF
     
+    # Make the script executable
     chmod +x "$deploy_script_path"
-    print_success "Created deploy script: ${deploy_script_path}"
+    
+    if [ -x "$deploy_script_path" ]; then
+        print_success "Created deploy script: ${deploy_script_path}"
+    else
+        print_warning "Created deploy script but failed to set execute permissions: ${deploy_script_path}"
+        print_info "You may need to run: chmod +x ${deploy_script_path}"
+    fi
 }
 
 # Show current configuration in table format
