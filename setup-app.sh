@@ -712,7 +712,7 @@ EOF
 
 # Create GitHub repository for app source code
 create_app_repo() {
-    SOURCE_REPO="${GITHUB_ORG}/${APP_NAME}-main"
+    SOURCE_REPO="${GITHUB_ORG}/${APP_NAME}"
     
     print_info "Checking for app source repository: $SOURCE_REPO"
     
