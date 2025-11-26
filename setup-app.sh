@@ -143,7 +143,7 @@ extract_current_values() {
 prompt_app_name() {
     while true; do
         print_question "Enter app name:"
-        read -r APP_NAME
+        read -r APP_NAME < /dev/tty
         
         if [ -z "$APP_NAME" ]; then
             print_error "App name cannot be empty"
@@ -178,14 +178,14 @@ prompt_app_name() {
 prompt_environment() {
     if [ "$APP_EXISTS" = true ] && [ -n "$ENVIRONMENT" ]; then
         print_question "Environment [current: $ENVIRONMENT] (press Enter to keep, or enter new):"
-        read -r ENV_INPUT
+        read -r ENV_INPUT < /dev/tty
         
         if [ -z "$ENV_INPUT" ]; then
             return 0
         fi
     else
         print_question "Configure for which environment? (production/staging) [default: production]:"
-        read -r ENV_INPUT
+        read -r ENV_INPUT < /dev/tty
     fi
     
     if [ -z "$ENV_INPUT" ]; then
@@ -211,10 +211,10 @@ prompt_environment() {
 prompt_replicas() {
     if [ "$APP_EXISTS" = true ] && [ -n "$REPLICAS" ]; then
         print_question "Number of replicas [current: $REPLICAS] (press Enter to keep):"
-        read -r REPLICAS_INPUT
+        read -r REPLICAS_INPUT < /dev/tty
     else
         print_question "Enter number of replicas [default: 1]:"
-        read -r REPLICAS_INPUT
+        read -r REPLICAS_INPUT < /dev/tty
     fi
     
     if [ -z "$REPLICAS_INPUT" ]; then
@@ -232,35 +232,35 @@ prompt_replicas() {
 prompt_resources() {
     if [ "$APP_EXISTS" = true ]; then
         print_question "Memory request [current: $MEMORY_REQUEST] (press Enter to keep):"
-        read -r MEMORY_REQUEST_INPUT
+        read -r MEMORY_REQUEST_INPUT < /dev/tty
         MEMORY_REQUEST="${MEMORY_REQUEST_INPUT:-$MEMORY_REQUEST}"
         
         print_question "Memory limit [current: $MEMORY_LIMIT] (press Enter to keep):"
-        read -r MEMORY_LIMIT_INPUT
+        read -r MEMORY_LIMIT_INPUT < /dev/tty
         MEMORY_LIMIT="${MEMORY_LIMIT_INPUT:-$MEMORY_LIMIT}"
         
         print_question "CPU request [current: $CPU_REQUEST] (press Enter to keep):"
-        read -r CPU_REQUEST_INPUT
+        read -r CPU_REQUEST_INPUT < /dev/tty
         CPU_REQUEST="${CPU_REQUEST_INPUT:-$CPU_REQUEST}"
         
         print_question "CPU limit [current: $CPU_LIMIT] (press Enter to keep):"
-        read -r CPU_LIMIT_INPUT
+        read -r CPU_LIMIT_INPUT < /dev/tty
         CPU_LIMIT="${CPU_LIMIT_INPUT:-$CPU_LIMIT}"
     else
         print_question "Enter memory request [default: 256Mi]:"
-        read -r MEMORY_REQUEST_INPUT
+        read -r MEMORY_REQUEST_INPUT < /dev/tty
         MEMORY_REQUEST="${MEMORY_REQUEST_INPUT:-256Mi}"
         
         print_question "Enter memory limit [default: 512Mi]:"
-        read -r MEMORY_LIMIT_INPUT
+        read -r MEMORY_LIMIT_INPUT < /dev/tty
         MEMORY_LIMIT="${MEMORY_LIMIT_INPUT:-512Mi}"
         
         print_question "Enter CPU request [default: 100m]:"
-        read -r CPU_REQUEST_INPUT
+        read -r CPU_REQUEST_INPUT < /dev/tty
         CPU_REQUEST="${CPU_REQUEST_INPUT:-100m}"
         
         print_question "Enter CPU limit [default: 250m]:"
-        read -r CPU_LIMIT_INPUT
+        read -r CPU_LIMIT_INPUT < /dev/tty
         CPU_LIMIT="${CPU_LIMIT_INPUT:-250m}"
     fi
 }
@@ -269,10 +269,10 @@ prompt_resources() {
 prompt_container_port() {
     if [ "$APP_EXISTS" = true ] && [ -n "$CONTAINER_PORT" ]; then
         print_question "Container port [current: $CONTAINER_PORT] (press Enter to keep):"
-        read -r CONTAINER_PORT_INPUT
+        read -r CONTAINER_PORT_INPUT < /dev/tty
     else
         print_question "Enter container port [default: 3000]:"
-        read -r CONTAINER_PORT_INPUT
+        read -r CONTAINER_PORT_INPUT < /dev/tty
     fi
     
     CONTAINER_PORT="${CONTAINER_PORT_INPUT:-${CONTAINER_PORT:-3000}}"
@@ -330,7 +330,7 @@ manage_ingress_menu() {
         print_menu "3. Done with ingress configuration"
         echo ""
         print_question "Choose an option:"
-        read -r INGRESS_CHOICE
+        read -r INGRESS_CHOICE < /dev/tty
         
         case "$INGRESS_CHOICE" in
             1)
@@ -352,7 +352,7 @@ manage_ingress_menu() {
 # Add a single ingress route
 add_ingress_route() {
     print_question "Enter domain name (e.g., myapp.winit.dev):"
-    read -r DOMAIN
+    read -r DOMAIN < /dev/tty
     
     if [ -z "$DOMAIN" ]; then
         print_error "Domain cannot be empty"
@@ -366,7 +366,7 @@ add_ingress_route() {
     fi
     
     print_question "Enter local port for $DOMAIN [default: $CONTAINER_PORT]:"
-    read -r PORT_INPUT
+    read -r PORT_INPUT < /dev/tty
     PORT="${PORT_INPUT:-$CONTAINER_PORT}"
     
     if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
@@ -390,7 +390,7 @@ remove_ingress_route() {
     
     echo ""
     print_question "Enter domain name to remove:"
-    read -r DOMAIN_TO_REMOVE
+    read -r DOMAIN_TO_REMOVE < /dev/tty
     
     if [ -z "$DOMAIN_TO_REMOVE" ]; then
         return
@@ -696,7 +696,7 @@ create_app_repo() {
     fi
     
     print_question "Create new GitHub repository '$SOURCE_REPO' for app source code? (Y/n):"
-    read -r CREATE_REPO
+    read -r CREATE_REPO < /dev/tty
     
     if [[ "$CREATE_REPO" =~ ^[Nn]$ ]]; then
         print_info "Skipping repository creation"
@@ -868,7 +868,7 @@ main_menu() {
         print_menu "4. Exit without saving"
         echo ""
         print_question "Choose an option:"
-        read -r MENU_CHOICE
+        read -r MENU_CHOICE < /dev/tty
         
         case "$MENU_CHOICE" in
             1)
