@@ -1,0 +1,8 @@
+# Ignore everything
+*
+
+# Except these files
+!README.md
+!setup-app.sh
+!.gitignore
+
