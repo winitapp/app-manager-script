@@ -57,7 +57,7 @@ read_input() {
 
 # Configuration
 GITHUB_ORG="winit-testabc"
-ECR_REGISTRY="418295680544.dkr.ecr.us-east-1.amazonaws.com/winitxyz"
+ECR_REGISTRY="240941311564.dkr.ecr.us-east-1.amazonaws.com/winitxyz"
 
 # Global variables
 APP_NAME=""
