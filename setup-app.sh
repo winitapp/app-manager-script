@@ -1706,7 +1706,7 @@ main() {
     setup_k8s_repo
     
     # Check if app exists and show main menu
-    check_app_exists
+    check_app_exists || true  # Don't exit if app doesn't exist (new app)
     main_menu
 }
 
