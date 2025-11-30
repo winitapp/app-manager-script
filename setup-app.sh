@@ -710,9 +710,8 @@ ${INGRESS_LIST}
 ## Build & Deploy
 
 \`\`\`bash
-# Deploy using script
-cd ../WinIT-DO
-./scripts/deploy-app.sh ${APP_NAME} v1.0.0-${ENVIRONMENT} ${GITHUB_ORG}/${APP_NAME}
+# Deploy using the generated deploy script
+./${APP_NAME}-deploy.sh
 \`\`\`
 EOF
     
@@ -887,8 +886,8 @@ read_input() {
 # Prompt for environment
 prompt_environment() {
     while true; do
-        print_question "Select environment (production/staging) [default: production]: "
-        read_input "Select environment (production/staging) [default: production]: " ENV "production"
+        print_question "Select environment (production/staging) [default: staging]: "
+        read_input "Select environment (production/staging) [default: staging]: " ENV "staging"
         
         ENV=$(echo "$ENV" | tr '[:upper:]' '[:lower:]')
         
@@ -918,7 +917,16 @@ prompt_version() {
         exit 1
     fi
     
-    TAG="v${VERSION}-${ENV_SUFFIX}"
+    # Tag format for workflow: v{VERSION}-{ENV}
+    # The workflow receives service_name separately via workflow_dispatch inputs
+    # Example: v1.0.0-staging
+    # Tag format for workflow: v{VERSION}-{ENV}
+    # The workflow receives service_name separately via workflow_dispatch inputs
+    TAG="v\${VERSION}-\${ENV_SUFFIX}"
+    
+    # Version tracking tag format: v{VERSION}-{APP_NAME}-{ENV}
+    # This tag is used for version detection only (doesn't trigger workflow)
+    K8S_TAG="v\${VERSION}-${APP_NAME}-\${ENV_SUFFIX}"
 }
 
 # Main execution
@@ -935,46 +943,66 @@ main() {
     echo ""
     print_info "Deployment details:"
     echo "  App: ${APP_NAME}"
-    echo "  Version: ${TAG}"
-    echo "  Environment: ${ENV_SUFFIX}"
+    echo "  Version: \${TAG}"
+    echo "  Environment: \${ENV_SUFFIX}"
     echo "  Source Repo: ${SOURCE_REPO}"
     echo ""
     
-    # Find WinIT-DO directory (assumes app repo is cloned alongside WinIT-DO)
-    SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+    # Determine k8s repo based on environment
+    local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    if [ "\${ENV_SUFFIX}" = "staging" ]; then
+        k8s_repo="\${GITHUB_ORG}/k8s-staging"
+    fi
     
-    # Try common locations for WinIT-DO
-    WINIT_DO_DIRS=(
-        "\$(dirname "\$SCRIPT_DIR")/WinIT-DO"
-        "\$(dirname "\$(dirname "\$SCRIPT_DIR")")/WinIT-DO"
-        "\$HOME/WinIT-DO"
-        "."
-    )
+    # Trigger workflow via workflow_dispatch
+    print_info "Triggering deployment workflow..."
+    echo ""
     
-    DEPLOY_SCRIPT=""
-    for dir in "\${WINIT_DO_DIRS[@]}"; do
-        if [ -f "\$dir/scripts/deploy-app.sh" ]; then
-            DEPLOY_SCRIPT="\$dir/scripts/deploy-app.sh"
-            break
-        fi
-    done
-    
-    if [ -z "\$DEPLOY_SCRIPT" ] || [ ! -f "\$DEPLOY_SCRIPT" ]; then
-        print_error "Could not find deploy-app.sh script"
-        print_info ""
-        print_info "Please ensure WinIT-DO repository is cloned and accessible."
-        print_info ""
-        print_info "You can deploy manually using:"
-        echo "  cd WinIT-DO"
-        echo "  ./scripts/deploy-app.sh ${APP_NAME} \${TAG} ${SOURCE_REPO}"
+    if ! gh workflow run "deploy-from-tag.yml" \\
+        --repo "\$k8s_repo" \\
+        -f service_name="${APP_NAME}" \\
+        -f tag="\${TAG}" \\
+        -f source_repo="\${SOURCE_REPO}" 2>&1; then
+        print_error "Failed to trigger workflow"
         exit 1
     fi
     
-    print_info "Running deployment script..."
-    echo ""
+    print_success "Workflow triggered successfully"
     
-    # Execute deploy script
-    bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}"
+    # Create version tracking tag (for version detection, doesn't trigger workflow)
+    print_info "Creating version tracking tag \${K8S_TAG} on \$k8s_repo..."
+    local main_sha=\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha 2>/dev/null)
+    if [ -n "\$main_sha" ]; then
+        if ! gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} --jq .ref >/dev/null 2>&1; then
+            # Tag doesn't exist, create it
+            gh api repos/\${k8s_repo}/git/refs -X POST -f ref="refs/tags/\${K8S_TAG}" -f sha="\$main_sha" >/dev/null 2>&1 && \\
+                print_success "Version tracking tag \${K8S_TAG} created" || \\
+                print_warning "Failed to create version tracking tag (non-critical)"
+        else
+            # Tag exists, update it
+            gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} -X PATCH -f sha="\$main_sha" >/dev/null 2>&1 && \\
+                print_success "Version tracking tag \${K8S_TAG} updated" || \\
+                print_warning "Failed to update version tracking tag (non-critical)"
+        fi
+    fi
+    
+    # Wait a moment for the workflow to be created
+    sleep 2
+    
+    # Get the latest workflow run ID
+    local run_id=\$(gh run list --repo "\$k8s_repo" --workflow="deploy-from-tag.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    
+    if [ -n "\$run_id" ] && [ "\$run_id" != "null" ]; then
+        local run_url="https://github.com/\$k8s_repo/actions/runs/\$run_id"
+        print_success "Workflow triggered successfully"
+        print_info "Workflow run ID: \$run_id"
+        print_info "Workflow run URL: \$run_url"
+    else
+        print_warning "Could not get workflow run ID immediately"
+        print_info "The workflow may still be starting. Check workflow runs manually:"
+        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        run_id=""
+    fi
 }
 
 main "\$@"
@@ -1205,8 +1233,8 @@ read_input() {
 # Prompt for environment
 prompt_environment() {
     while true; do
-        print_question "Select environment (production/staging) [default: production]: "
-        read_input "Select environment (production/staging) [default: production]: " ENV_INPUT "production"
+        print_question "Select environment (production/staging) [default: staging]: "
+        read_input "Select environment (production/staging) [default: staging]: " ENV_INPUT "staging"
         
         ENV=\$(echo "\$ENV_INPUT" | tr '[:upper:]' '[:lower:]')
         
@@ -1322,13 +1350,15 @@ prompt_version() {
         exit 1
     fi
     
-    # Tag format for workflow dispatch: v{VERSION}-{ENV}
-    # The deploy script passes service_name separately to the workflow
-    # Example: v1.0.0-prod
+    # Tag format for workflow: v{VERSION}-{ENV}
+    # The workflow receives service_name separately via workflow_dispatch inputs
+    # Example: v1.0.0-staging
+    # Tag format for workflow: v{VERSION}-{ENV}
+    # The workflow receives service_name separately via workflow_dispatch inputs
     TAG="v\${VERSION}-\${ENV_SUFFIX}"
     
-    # Also create a tag on k8s repository for version detection: v{VERSION}-{APP_NAME}-{ENV}
-    # This tag is used by version detection to find the latest version
+    # Version tracking tag format: v{VERSION}-{APP_NAME}-{ENV}
+    # This tag is used for version detection only (doesn't trigger workflow)
     K8S_TAG="v\${VERSION}-${APP_NAME}-\${ENV_SUFFIX}"
 }
 
@@ -1356,7 +1386,7 @@ monitor_deployment_by_id() {
     
     # Wait a moment for the workflow to start (if it was just triggered)
     print_info "Waiting for workflow to start..."
-    local max_attempts=10
+    local max_attempts=15
     local attempt=0
     local run_exists=false
     
@@ -1366,8 +1396,10 @@ monitor_deployment_by_id() {
             break
         fi
         attempt=\$((attempt + 1))
-        sleep 2
+        printf "."
+        sleep 1
     done
+    echo ""
     
     if [ "\$run_exists" = false ]; then
         print_warning "Workflow run #\${run_id} not found or not accessible"
@@ -1382,32 +1414,67 @@ monitor_deployment_by_id() {
         return 0
     fi
     
-    # Watch the workflow run
-    local watch_output
-    if watch_output=\$(gh run watch "\$run_id" --repo "\$k8s_repo" --exit-status 2>&1); then
-        local exit_code=0
-        echo "\$watch_output"
-    else
-        local exit_code=\$?
-        echo "\$watch_output" >&2
+    # Show real-time progress by polling instead of using watch (which buffers)
+    echo ""
+    print_info "Workflow started! Showing real-time progress..."
+    echo ""
+    
+    local last_jobs_json=""
+    local exit_code=0
+    local iteration=0
+    
+    while true; do
+        # Get current workflow status and jobs
+        local status_json=\$(gh run view "\$run_id" --repo "\$k8s_repo" --json status,conclusion,displayTitle,jobs 2>/dev/null)
         
-        # Check if it's a 404 error (run not found)
-        if echo "\$watch_output" | grep -q "404\|Not Found"; then
-            print_warning "Workflow run not found or not accessible"
-            print_info "The workflow may not have started yet, or you may not have permissions to view it"
-            echo ""
-            print_info "You can check manually:"
-            echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
-            echo "  Or visit: \$run_url"
-            return 0
+        if [ -z "\$status_json" ]; then
+            print_warning "Could not fetch workflow status"
+            break
         fi
         
-        # For other errors, exit with the error code
-        print_error "Failed to monitor workflow run"
-        echo ""
-        print_info "View workflow run: \$run_url"
-        exit \$exit_code
-    fi
+        local current_status=\$(echo "\$status_json" | jq -r '.status')
+        local current_conclusion=\$(echo "\$status_json" | jq -r '.conclusion // "none"')
+        local current_jobs=\$(echo "\$status_json" | jq -c '.jobs[]' 2>/dev/null)
+        
+        # Show job progress updates when they change
+        local current_jobs_display=\$(echo "\$status_json" | jq -r '.jobs[] | "\(.name): \(.status)\(if .conclusion then " (\(.conclusion))" else "" end)"' 2>/dev/null | sort)
+        
+        if [ "\$current_jobs_display" != "\$last_jobs_json" ]; then
+            # Show updated status
+            echo ""
+            echo "\$current_jobs_display" | while IFS= read -r job_line; do
+                if [ -n "\$job_line" ]; then
+                    # Color code based on status
+                    if echo "\$job_line" | grep -q "completed (success)"; then
+                        echo -e "  \${GREEN}✓\${NC} \$job_line"
+                    elif echo "\$job_line" | grep -q "completed (failure)"; then
+                        echo -e "  \${RED}✗\${NC} \$job_line"
+                    elif echo "\$job_line" | grep -q "in_progress"; then
+                        echo -e "  \${YELLOW}→\${NC} \$job_line"
+                    elif echo "\$job_line" | grep -q "queued"; then
+                        echo -e "  \${BLUE}○\${NC} \$job_line"
+                    else
+                        echo "  \$job_line"
+                    fi
+                fi
+            done
+            last_jobs_json="\$current_jobs_display"
+        fi
+        
+        # Check if workflow is done
+        if [ "\$current_status" = "completed" ]; then
+            echo ""
+            if [ "\$current_conclusion" = "success" ]; then
+                exit_code=0
+            else
+                exit_code=1
+            fi
+            break
+        fi
+        
+        iteration=\$((iteration + 1))
+        sleep 2
+    done
     
     echo ""
     if [ \$exit_code -eq 0 ]; then
@@ -1444,79 +1511,64 @@ main() {
     echo "  Source Repo: ${SOURCE_REPO}"
     echo ""
     
-    # Find WinIT-DO directory (assumes app repo is cloned alongside WinIT-DO)
-    SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-    
-    # Try common locations for WinIT-DO
-    WINIT_DO_DIRS=(
-        "\$(dirname "\$SCRIPT_DIR")/WinIT-DO"
-        "\$(dirname "\$(dirname "\$SCRIPT_DIR")")/WinIT-DO"
-        "\$HOME/WinIT-DO"
-        "."
-    )
-    
-    DEPLOY_SCRIPT=""
-    for dir in "\${WINIT_DO_DIRS[@]}"; do
-        if [ -f "\$dir/scripts/deploy-app.sh" ]; then
-            DEPLOY_SCRIPT="\$dir/scripts/deploy-app.sh"
-            break
-        fi
-    done
-    
-    if [ -z "\$DEPLOY_SCRIPT" ] || [ ! -f "\$DEPLOY_SCRIPT" ]; then
-        print_error "Could not find deploy-app.sh script"
-        print_info ""
-        print_info "Please ensure WinIT-DO repository is cloned and accessible."
-        print_info ""
-        print_info "You can deploy manually using:"
-        echo "  cd WinIT-DO"
-        echo "  ./scripts/deploy-app.sh ${APP_NAME} \${TAG} ${SOURCE_REPO}"
-        exit 1
-    fi
-    
-    print_info "Running deployment script..."
-    echo ""
-    
-    # Execute deploy script and capture output to extract run ID
-    # Auto-confirm the prompt by piping 'y' to stdin
-    local deploy_output=\$(echo "y" | bash "\$DEPLOY_SCRIPT" "${APP_NAME}" "\${TAG}" "${SOURCE_REPO}" 2>&1)
-    local deploy_exit=\$?
-    
-    # Extract workflow run ID from output (look for "actions/runs/" URL)
-    local run_id=\$(echo "\$deploy_output" | grep -oE "actions/runs/[0-9]+" | head -1 | sed 's|actions/runs/||')
-    
-    # Also try to extract from "Workflow run:" line
-    if [ -z "\$run_id" ]; then
-        run_id=\$(echo "\$deploy_output" | grep -oE "runs/[0-9]+" | head -1 | sed 's|runs/||')
-    fi
-    
-    # If deploy script failed, exit
-    if [ \$deploy_exit -ne 0 ]; then
-        echo "\$deploy_output"
-        exit \$deploy_exit
-    fi
-    
-    echo "\$deploy_output"
-    echo ""
-    
-    # Create and push tag to k8s repository for version tracking
-    # This allows version detection to work correctly
-    print_info "Creating version tag on k8s repository..."
+    # Determine k8s repo based on environment
     local k8s_repo="\${GITHUB_ORG}/k8s-production"
     if [ "\${ENV_SUFFIX}" = "staging" ]; then
         k8s_repo="\${GITHUB_ORG}/k8s-staging"
     fi
     
-    # Create tag directly using gh CLI (faster than cloning)
-    # This creates a lightweight tag on the k8s repository
-    print_info "Creating version tag \${K8S_TAG} on \$k8s_repo..."
-    if gh api repos/\${k8s_repo}/git/refs -X POST -f ref="refs/tags/\${K8S_TAG}" -f sha="\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha)" 2>/dev/null; then
-        print_success "Tag \${K8S_TAG} created on \$k8s_repo"
-    elif gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} -X PATCH -f sha="\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha)" 2>/dev/null; then
-        print_success "Tag \${K8S_TAG} updated on \$k8s_repo"
-    else
-        print_warning "Could not create tag \${K8S_TAG} on \$k8s_repo (may need manual creation)"
+    # Trigger workflow via workflow_dispatch
+    print_info "Triggering deployment workflow..."
+    echo ""
+    
+    if ! gh workflow run "deploy-from-tag.yml" \\
+        --repo "\$k8s_repo" \\
+        -f service_name="${APP_NAME}" \\
+        -f tag="\${TAG}" \\
+        -f source_repo="\${SOURCE_REPO}" 2>&1; then
+        print_error "Failed to trigger workflow"
+        exit 1
     fi
+    
+    print_success "Workflow triggered successfully"
+    
+    # Create version tracking tag (for version detection, doesn't trigger workflow)
+    print_info "Creating version tracking tag \${K8S_TAG} on \$k8s_repo..."
+    local main_sha=\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha 2>/dev/null)
+    if [ -n "\$main_sha" ]; then
+        if ! gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} --jq .ref >/dev/null 2>&1; then
+            # Tag doesn't exist, create it
+            gh api repos/\${k8s_repo}/git/refs -X POST -f ref="refs/tags/\${K8S_TAG}" -f sha="\$main_sha" >/dev/null 2>&1 && \\
+                print_success "Version tracking tag \${K8S_TAG} created" || \\
+                print_warning "Failed to create version tracking tag (non-critical)"
+        else
+            # Tag exists, update it
+            gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} -X PATCH -f sha="\$main_sha" >/dev/null 2>&1 && \\
+                print_success "Version tracking tag \${K8S_TAG} updated" || \\
+                print_warning "Failed to update version tracking tag (non-critical)"
+        fi
+    fi
+    
+    # Wait a moment for the workflow to be created
+    sleep 2
+    
+    # Get the latest workflow run ID
+    local run_id=\$(gh run list --repo "\$k8s_repo" --workflow="deploy-from-tag.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    
+    if [ -n "\$run_id" ] && [ "\$run_id" != "null" ]; then
+        local run_url="https://github.com/\$k8s_repo/actions/runs/\$run_id"
+        print_success "Workflow triggered successfully"
+        print_info "Workflow run ID: \$run_id"
+        print_info "Workflow run URL: \$run_url"
+    else
+        print_warning "Could not get workflow run ID immediately"
+        print_info "The workflow may still be starting. Check workflow runs manually:"
+        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        # Set run_id to empty so monitoring is skipped
+        run_id=""
+    fi
+    
+    echo ""
     
     # Monitor the deployment if we found a run ID
     if [ -n "\$run_id" ]; then
@@ -1641,10 +1693,13 @@ show_usage_info() {
     echo "   - Environment (production/staging)"
     echo "   - Version number (e.g., 1.0.0)"
     echo ""
-    echo "   Option 2: Use the deploy script directly"
-    echo "   ----------------------------------------"
-    echo "   cd WinIT-DO"
-    echo "   ./scripts/deploy-app.sh ${APP_NAME} v1.0.0-production ${GITHUB_ORG}/${APP_NAME}"
+    echo "   Option 2: Trigger workflow manually"
+    echo "   ------------------------------------"
+    echo "   gh workflow run deploy-from-tag.yml \\"
+    echo "     --repo ${K8S_REPO} \\"
+    echo "     -f service_name=${APP_NAME} \\"
+    echo "     -f tag=v1.0.0-production \\"
+    echo "     -f source_repo=${GITHUB_ORG}/${APP_NAME}"
     echo ""
     echo "📝 Kubernetes Manifests:"
     echo "   https://github.com/${K8S_REPO}/tree/main/apps/${APP_NAME}"
