@@ -46,7 +46,7 @@ read_input() {
             # Last resort: try /dev/tty anyway (might work in some cases)
             read -r "$@" < /dev/tty 2>/dev/null || {
                 print_error "Cannot read from terminal. Please download and run the script:"
-                echo "  curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh"
+                echo "  curl -fsSL https://raw.githubusercontent.com/winitapp/app-manager-script/main/setup-app.sh -o setup-app.sh"
                 echo "  chmod +x setup-app.sh"
                 echo "  ./setup-app.sh"
                 exit 1
@@ -56,7 +56,7 @@ read_input() {
 }
 
 # Configuration
-GITHUB_ORG="winit-testabc"
+GITHUB_ORG="winitapp"
 ECR_REGISTRY="240941311564.dkr.ecr.us-east-1.amazonaws.com/winitxyz"
 
 # Global variables
@@ -1354,10 +1354,61 @@ monitor_deployment_by_id() {
     print_info "Workflow run URL: \$run_url"
     echo ""
     
-    # Watch the workflow run
-    gh run watch "\$run_id" --repo "\$k8s_repo" --exit-status
+    # Wait a moment for the workflow to start (if it was just triggered)
+    print_info "Waiting for workflow to start..."
+    local max_attempts=10
+    local attempt=0
+    local run_exists=false
     
-    local exit_code=\$?
+    while [ \$attempt -lt \$max_attempts ]; do
+        if gh run view "\$run_id" --repo "\$k8s_repo" &>/dev/null; then
+            run_exists=true
+            break
+        fi
+        attempt=\$((attempt + 1))
+        sleep 2
+    done
+    
+    if [ "\$run_exists" = false ]; then
+        print_warning "Workflow run #\${run_id} not found or not accessible"
+        print_info "This might happen if:"
+        echo "  - The workflow hasn't started yet (check manually in a few moments)"
+        echo "  - You don't have permissions to view the workflow run"
+        echo "  - The run ID is incorrect"
+        echo ""
+        print_info "You can check manually:"
+        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        echo "  Or visit: \$run_url"
+        return 0
+    fi
+    
+    # Watch the workflow run
+    local watch_output
+    if watch_output=\$(gh run watch "\$run_id" --repo "\$k8s_repo" --exit-status 2>&1); then
+        local exit_code=0
+        echo "\$watch_output"
+    else
+        local exit_code=\$?
+        echo "\$watch_output" >&2
+        
+        # Check if it's a 404 error (run not found)
+        if echo "\$watch_output" | grep -q "404\|Not Found"; then
+            print_warning "Workflow run not found or not accessible"
+            print_info "The workflow may not have started yet, or you may not have permissions to view it"
+            echo ""
+            print_info "You can check manually:"
+            echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+            echo "  Or visit: \$run_url"
+            return 0
+        fi
+        
+        # For other errors, exit with the error code
+        print_error "Failed to monitor workflow run"
+        echo ""
+        print_info "View workflow run: \$run_url"
+        exit \$exit_code
+    fi
+    
     echo ""
     if [ \$exit_code -eq 0 ]; then
         print_success "Deployment completed successfully!"
@@ -1683,7 +1734,7 @@ main() {
         print_warning "Terminal device (/dev/tty) not found. Interactive input may not work."
         echo ""
         echo "For best results, download and run the script:"
-        echo "  curl -fsSL https://raw.githubusercontent.com/winit-testabc/app-manager-script/main/setup-app.sh -o setup-app.sh"
+        echo "  curl -fsSL https://raw.githubusercontent.com/winitapp/app-manager-script/main/setup-app.sh -o setup-app.sh"
         echo "  chmod +x setup-app.sh"
         echo "  ./setup-app.sh"
         echo ""
@@ -1706,7 +1757,11 @@ main() {
     setup_k8s_repo
     
     # Check if app exists and show main menu
-    check_app_exists || true  # Don't exit if app doesn't exist (new app)
+    # Note: check_app_exists returns 1 for new apps, but we want to continue
+    if ! check_app_exists; then
+        # App doesn't exist (new app) - this is expected, continue to menu
+        :
+    fi
     main_menu
 }
 
