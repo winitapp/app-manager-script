@@ -156,11 +156,11 @@ check_app_exists() {
         echo "  Container Port: $CONTAINER_PORT"
         echo "  Resources: ${MEMORY_REQUEST}/${MEMORY_LIMIT} memory, ${CPU_REQUEST}/${CPU_LIMIT} CPU"
         echo ""
-        return 0
     else
+        APP_EXISTS=false
         print_info "App '$APP_NAME' not found (new app)"
-        return 1
     fi
+    return 0
 }
 
 # Extract current values from existing manifest
@@ -1812,11 +1812,7 @@ main() {
     setup_k8s_repo
     
     # Check if app exists and show main menu
-    # Note: check_app_exists returns 1 for new apps, but we want to continue
-    if ! check_app_exists; then
-        # App doesn't exist (new app) - this is expected, continue to menu
-        :
-    fi
+    check_app_exists
     main_menu
 }
 
