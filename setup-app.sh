@@ -644,6 +644,13 @@ spec:
           timeoutSeconds: 3
           failureThreshold: 3
       
+      # Fargate toleration - allows pods to schedule on Fargate nodes
+      tolerations:
+      - key: eks.amazonaws.com/compute-type
+        operator: Equal
+        value: fargate
+        effect: NoSchedule
+      
       # Graceful shutdown
       terminationGracePeriodSeconds: 30
 
