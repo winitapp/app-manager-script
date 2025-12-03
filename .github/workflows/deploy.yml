@@ -1,0 +1,58 @@
+name: Deploy from Tag
+
+on:
+  push:
+    tags:
+      - '*-prod'
+      - '*-production'
+      - '*-staging'
+
+permissions:
+  contents: write  # Required by reusable workflow to update k8s manifests
+  pull-requests: write  # Required by reusable workflow
+  id-token: write  # Required for OIDC
+
+jobs:
+  parse-tag:
+    name: Parse Tag
+    runs-on: ubuntu-latest
+    outputs:
+      service_name: ${{ steps.parse.outputs.service_name }}
+      k8s_path: ${{ steps.parse.outputs.k8s_path }}
+    steps:
+      - name: Parse tag and extract service name
+        id: parse
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          TAG="$TAG"
+          
+          # Extract service name from tag (format: v1.0.0-service-name-prod/staging)
+          # Remove version prefix and environment suffix
+          SERVICE_NAME=$(echo "$TAG" | sed 's/^v[0-9].*-//' | sed 's/-prod$//' | sed 's/-production$//' | sed 's/-staging$//')
+          
+          # Determine k8s path (standard format: apps/service-name/service-name.yaml)
+          K8S_PATH="apps/${SERVICE_NAME}/${SERVICE_NAME}.yaml"
+          
+          echo "service_name=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          echo "k8s_path=${K8S_PATH}" >> $GITHUB_OUTPUT
+          
+          echo "Tag: ${TAG}"
+          echo "Service Name: ${SERVICE_NAME}"
+          echo "K8s Path: ${K8S_PATH}"
+
+  deploy:
+    name: Deploy via GitOps
+    needs: parse-tag
+    uses: winitapp/gitops/.github/workflows/reusable-deploy.yml@main
+    # Note: Ensure gitops repo has "Accessible from repositories in the organization" enabled
+    # Settings → Actions → General → Access
+    with:
+      service_name: ${{ needs.parse-tag.outputs.service_name }}
+      tag: ${{ github.ref_name }}
+      k8s_path: ${{ needs.parse-tag.outputs.k8s_path }}
+      source_repo: ${{ github.repository }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+
