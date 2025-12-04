@@ -159,6 +159,25 @@ check_app_exists() {
     else
         APP_EXISTS=false
         print_info "App '$APP_NAME' not found (new app)"
+        # Initialize default values for new apps
+        if [ -z "$REPLICAS" ]; then
+            REPLICAS="1"
+        fi
+        if [ -z "$CONTAINER_PORT" ]; then
+            CONTAINER_PORT="8080"
+        fi
+        if [ -z "$MEMORY_REQUEST" ]; then
+            MEMORY_REQUEST="256Mi"
+        fi
+        if [ -z "$MEMORY_LIMIT" ]; then
+            MEMORY_LIMIT="512Mi"
+        fi
+        if [ -z "$CPU_REQUEST" ]; then
+            CPU_REQUEST="100m"
+        fi
+        if [ -z "$CPU_LIMIT" ]; then
+            CPU_LIMIT="250m"
+        fi
     fi
     return 0
 }
@@ -192,9 +211,34 @@ extract_current_values() {
 
 # Prompt for app name
 prompt_app_name() {
+    # Get current directory name as default (parent dir name relative to script location)
+    local default_name
+    # Try to get the directory name where the script is being run from
+    # This is typically the project/app directory name
+    default_name=$(basename "$(pwd)" 2>/dev/null || echo "")
+    
+    # Sanitize directory name: convert to lowercase, replace invalid chars with hyphens
+    if [ -n "$default_name" ]; then
+        default_name=$(echo "$default_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+    fi
+    
+    # If directory name is empty or invalid after sanitization, don't use it as default
+    if [ -z "$default_name" ] || [[ ! "$default_name" =~ ^[a-z0-9-]+$ ]]; then
+        default_name=""
+    fi
+    
     while true; do
-        print_question "Enter app name:"
+        if [ -n "$default_name" ]; then
+            print_question "Enter app name [default: $default_name]:"
+        else
+            print_question "Enter app name:"
+        fi
         read_input APP_NAME
+        
+        # Use default if empty
+        if [ -z "$APP_NAME" ] && [ -n "$default_name" ]; then
+            APP_NAME="$default_name"
+        fi
         
         if [ -z "$APP_NAME" ]; then
             print_error "App name cannot be empty"
@@ -220,13 +264,13 @@ prompt_environment() {
             return 0
         fi
     else
-        print_question "Configure for which environment? (production/staging) [default: production]:"
+        print_question "Configure for which environment? (production/staging) [default: staging]:"
         read_input ENV_INPUT
     fi
     
     if [ -z "$ENV_INPUT" ]; then
-        ENVIRONMENT="production"
-        NAMESPACE="production"
+        ENVIRONMENT="staging"
+        NAMESPACE="staging"
     else
         ENV_LOWER=$(echo "$ENV_INPUT" | tr '[:upper:]' '[:lower:]')
         if [ "$ENV_LOWER" = "production" ] || [ "$ENV_LOWER" = "prod" ]; then
@@ -236,9 +280,9 @@ prompt_environment() {
             ENVIRONMENT="staging"
             NAMESPACE="staging"
         else
-            print_error "Invalid environment. Using production"
-            ENVIRONMENT="production"
-            NAMESPACE="production"
+            print_error "Invalid environment. Using staging"
+            ENVIRONMENT="staging"
+            NAMESPACE="staging"
         fi
     fi
 }
@@ -1940,8 +1984,10 @@ main() {
     # Setup k8s repository
     setup_k8s_repo
     
-    # Check if app exists and show main menu
+    # Check if app exists
     check_app_exists
+    
+    # Show main menu
     main_menu
 }
 
