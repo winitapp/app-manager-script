@@ -1002,30 +1002,102 @@ main() {
     # Inject workflow if missing
     inject_workflow_if_missing
     
-    # Get default branch for source repo
-    local default_branch
-    default_branch=\$(gh api "repos/${SOURCE_REPO}" --jq -r '.default_branch' 2>/dev/null || echo "main")
-    
-    # Get the latest commit SHA for the default branch
-    print_info "Getting latest commit from \${default_branch} branch..."
-    local latest_sha
-    latest_sha=\$(gh api "repos/${SOURCE_REPO}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null)
-    
-    if [ -z "\$latest_sha" ]; then
-        print_error "Could not get latest commit SHA. Repository may be empty or inaccessible."
+    # Verify repository exists and is accessible
+    print_info "Verifying repository \${SOURCE_REPO}..."
+    if ! gh repo view "\${SOURCE_REPO}" &>/dev/null; then
+        print_error "Repository \${SOURCE_REPO} not found or not accessible."
+        print_info "Please ensure:"
+        echo "  1. The repository exists: \${SOURCE_REPO}"
+        echo "  2. You have access to the repository"
+        echo "  3. You are authenticated with GitHub CLI: gh auth status"
         exit 1
     fi
     
+    # Get default branch for source repo
+    local default_branch=""
+    local api_response
+    api_response=\$(gh api "repos/\${SOURCE_REPO}" 2>/dev/null || echo "")
+    
+    # Try to extract default branch using jq if available, otherwise use gh api with --jq
+    if command -v jq &>/dev/null && [ -n "\$api_response" ]; then
+        default_branch=\$(echo "\$api_response" | jq -r '.default_branch // ""' 2>/dev/null || echo "")
+    elif [ -n "\$api_response" ]; then
+        # Fallback: try to extract with grep/sed if jq not available
+        default_branch=\$(echo "\$api_response" | grep -o '"default_branch"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"default_branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "")
+    fi
+    
+    # If we still don't have default branch, try API with --jq flag
+    if [ -z "\$default_branch" ]; then
+        default_branch=\$(gh api "repos/\${SOURCE_REPO}" --jq -r '.default_branch' 2>/dev/null || echo "")
+    fi
+    
+    # Try to get commit SHA from available branches (try default first, then both)
+    local latest_sha=""
+    local branch_to_use=""
+    
+    # Try branches in order: default branch (if known), then main, then master
+    local branches_to_try=""
+    if [ -n "\$default_branch" ]; then
+        branches_to_try="\${default_branch} main master"
+        print_info "Default branch: \${default_branch}"
+    else
+        branches_to_try="main master"
+        print_info "Could not determine default branch, trying main and master..."
+    fi
+    
+    for branch in \$branches_to_try; do
+        # Skip if we already found a branch
+        if [ -n "\$branch_to_use" ]; then
+            break
+        fi
+        
+        print_info "Trying \${branch} branch..."
+        
+        # Try to get commit SHA
+        local branch_response
+        branch_response=\$(gh api "repos/\${SOURCE_REPO}/git/ref/heads/\${branch}" 2>/dev/null || echo "")
+        
+        if [ -n "\$branch_response" ]; then
+            if command -v jq &>/dev/null; then
+                latest_sha=\$(echo "\$branch_response" | jq -r '.object.sha // ""' 2>/dev/null || echo "")
+            else
+                # Fallback: try with --jq flag
+                latest_sha=\$(gh api "repos/\${SOURCE_REPO}/git/ref/heads/\${branch}" --jq -r '.object.sha' 2>/dev/null || echo "")
+            fi
+            
+            if [ -n "\$latest_sha" ] && [ "\$latest_sha" != "null" ] && [ "\$latest_sha" != "" ]; then
+                branch_to_use="\${branch}"
+                print_success "Found commit on \${branch} branch: \${latest_sha:0:7}..."
+                break
+            fi
+        fi
+    done
+    
+    if [ -z "\$latest_sha" ] || [ "\$latest_sha" = "null" ] || [ -z "\$branch_to_use" ]; then
+        print_error "Could not get latest commit SHA from main or master branch."
+        print_info "The repository exists but both branches may be empty."
+        print_info "Please create an initial commit:"
+        echo "  cd <your-repo-directory>"
+        echo "  git init"
+        echo "  git commit --allow-empty -m \"Initial commit\""
+        echo "  git branch -M main"
+        echo "  git remote add origin https://github.com/\${SOURCE_REPO}.git"
+        echo "  git push -u origin main"
+        exit 1
+    fi
+    
+    print_success "Found commit on \${branch_to_use} branch: \${latest_sha:0:7}..."
+    
     # Create tag in source repo (this triggers the workflow)
-    print_info "Creating tag \${TAG} in ${SOURCE_REPO}..."
-    if gh api "repos/${SOURCE_REPO}/git/refs" \\
+    print_info "Creating tag \${TAG} in \${SOURCE_REPO}..."
+    if gh api "repos/\${SOURCE_REPO}/git/refs" \\
         -X POST \\
         -f ref="refs/tags/\${TAG}" \\
         -f sha="\$latest_sha" &>/dev/null; then
         print_success "Tag \${TAG} created successfully"
     else
         # Tag might already exist, try to update it
-        if gh api "repos/${SOURCE_REPO}/git/refs/tags/\${TAG}" \\
+        if gh api "repos/\${SOURCE_REPO}/git/refs/tags/\${TAG}" \\
             -X PATCH \\
             -f sha="\$latest_sha" &>/dev/null; then
             print_success "Tag \${TAG} updated successfully"
@@ -1040,17 +1112,17 @@ main() {
     
     # Get the latest workflow run ID from source repo
     local run_id
-    run_id=\$(gh run list --repo "${SOURCE_REPO}" --workflow="deploy.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    run_id=\$(gh run list --repo "\${SOURCE_REPO}" --workflow="deploy.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
     
     if [ -n "\$run_id" ] && [ "\$run_id" != "null" ]; then
-        local run_url="https://github.com/${SOURCE_REPO}/actions/runs/\$run_id"
+        local run_url="https://github.com/\${SOURCE_REPO}/actions/runs/\$run_id"
         print_success "Workflow triggered successfully"
         print_info "Workflow run ID: \$run_id"
         print_info "Workflow run URL: \$run_url"
     else
         print_warning "Could not get workflow run ID immediately"
         print_info "The workflow may still be starting. Check workflow runs manually:"
-        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
+        echo "  gh run list --repo \${SOURCE_REPO} --workflow=deploy.yml"
         run_id=""
     fi
     
@@ -1062,7 +1134,7 @@ main() {
     else
         print_warning "Could not extract workflow run ID from output"
         print_info "You can monitor manually:"
-        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
+        echo "  gh run list --repo \${SOURCE_REPO} --workflow=deploy.yml"
     fi
 }
 
@@ -1242,12 +1314,31 @@ inject_workflow_if_missing() {
     local default_branch
     default_branch=$(gh api "repos/${source_repo}" --jq -r '.default_branch' 2>/dev/null || echo "main")
     
-    # Get the latest commit SHA for the default branch
-    local latest_sha
-    latest_sha=$(gh api "repos/${source_repo}/git/ref/heads/${default_branch}" --jq -r '.object.sha' 2>/dev/null)
+    # Try to get commit SHA from default branch first, then try the other branch
+    local latest_sha=""
+    local branch_to_use=""
     
-    if [ -z "$latest_sha" ]; then
-        print_warning "Could not get latest commit SHA. Repository may be empty."
+    # Try default branch first
+    latest_sha=$(gh api "repos/${source_repo}/git/ref/heads/${default_branch}" --jq -r '.object.sha' 2>/dev/null || echo "")
+    
+    if [ -n "$latest_sha" ] && [ "$latest_sha" != "null" ]; then
+        branch_to_use="$default_branch"
+    else
+        # Try the other branch (main if default is master, master if default is main)
+        local other_branch="main"
+        if [ "$default_branch" = "main" ]; then
+            other_branch="master"
+        fi
+        
+        latest_sha=$(gh api "repos/${source_repo}/git/ref/heads/${other_branch}" --jq -r '.object.sha' 2>/dev/null || echo "")
+        
+        if [ -n "$latest_sha" ] && [ "$latest_sha" != "null" ]; then
+            branch_to_use="$other_branch"
+        fi
+    fi
+    
+    if [ -z "$latest_sha" ] || [ "$latest_sha" = "null" ] || [ -z "$branch_to_use" ]; then
+        print_warning "Could not get latest commit SHA from main or master branch. Repository may be empty."
         print_info "You may need to create an initial commit first."
         return 1
     fi
@@ -1260,7 +1351,7 @@ inject_workflow_if_missing() {
         -X PUT \
         -f message="chore: add CI/CD deployment workflow" \
         -f content="$workflow_b64" \
-        -f branch="$default_branch" \
+        -f branch="$branch_to_use" \
         -f sha="$latest_sha" &>/dev/null; then
         print_success "Workflow injected successfully into ${source_repo}"
         return 0
@@ -1375,28 +1466,74 @@ prompt_environment() {
     done
 }
 
-# Get latest version tag from k8s repository
+# Get latest version tag from source app repository
 get_latest_version() {
     local env_suffix="\${ENV_SUFFIX}"
-    local app_name="${APP_NAME}"
+    local source_repo="\${SOURCE_REPO}"
     
-    # Determine k8s repo based on environment
-    if [ "\$env_suffix" = "staging" ]; then
-        local k8s_repo="\${GITHUB_ORG}/k8s-staging"
-    else
-        local k8s_repo="\${GITHUB_ORG}/k8s-production"
+    # Get all tags from source repo matching the pattern v*.*.*-{env}
+    # Format: v1.0.0-staging or v1.0.0-prod or v1.0.0-production
+    local latest_version=""
+    
+    # Try to get tags using gh api
+    local tags_response
+    tags_response=\$(gh api "repos/\${source_repo}/git/refs/tags" 2>/dev/null || echo "")
+    
+    if [ -n "\$tags_response" ]; then
+        # Extract version numbers from tags matching the pattern
+        # Build the grep pattern with the actual env_suffix value
+        local grep_pattern=""
+        
+        if command -v jq &>/dev/null; then
+            # Get all tag refs first
+            local all_tags
+            all_tags=\$(echo "\$tags_response" | jq -r '.[].ref' 2>/dev/null || echo "")
+            
+            if [ -n "\$all_tags" ]; then
+                # Filter tags matching v*.*.*-{env_suffix} pattern
+                # Use grep -E with -- to prevent option parsing issues
+                # Build the suffix pattern that will expand at runtime
+                local suffix_pattern="-\${env_suffix}\$"
+                
+                # Extract versions: filter tags ending with the suffix, then extract version number
+                latest_version=\$(echo "\$all_tags" | \\
+                    grep -E -- "\$suffix_pattern" | \\
+                    sed "s|refs/tags/v||" | \\
+                    sed "s/\$suffix_pattern//" | \\
+                    sort -V -t. -k1,1n -k2,2n -k3,3n | \\
+                    tail -1)
+                
+                # If no version found and env is prod, also try -production suffix
+                if [ -z "\$latest_version" ] && [ "\$env_suffix" = "prod" ]; then
+                    latest_version=\$(echo "\$all_tags" | \\
+                        grep -E -- "-production\$" | \\
+                        sed "s|refs/tags/v||" | \\
+                        sed "s/-production\$//" | \\
+                        sort -V -t. -k1,1n -k2,2n -k3,3n | \\
+                        tail -1)
+                fi
+            fi
+        else
+            # Fallback: use grep/sed if jq not available
+            # Note: This approach uses shell variable expansion in the pattern
+            latest_version=\$(echo "\$tags_response" | \\
+                grep "refs/tags/v[0-9]*\\.[0-9]*\\.[0-9]*-\${env_suffix}" | \\
+                sed "s|refs/tags/v||" | \\
+                sed "s/-\${env_suffix}\$//" | \\
+                sort -V -t. -k1,1n -k2,2n -k3,3n | \\
+                tail -1)
+            
+            # If no version found and env is prod, also try -production suffix
+            if [ -z "\$latest_version" ] && [ "\$env_suffix" = "prod" ]; then
+                latest_version=\$(echo "\$tags_response" | \\
+                    grep "refs/tags/v[0-9]*\\.[0-9]*\\.[0-9]*-production" | \\
+                    sed "s|refs/tags/v||" | \\
+                    sed "s/-production\$//" | \\
+                    sort -V -t. -k1,1n -k2,2n -k3,3n | \\
+                    tail -1)
+            fi
+        fi
     fi
-    
-    # Get all tags matching the pattern v*.*.*-{app_name}-{env}
-    # Format: v1.0.0-test3-prod or v1.0.0-test3-staging
-    # Use gh api to get tags and filter properly
-    # Note: app_name and env_suffix are local variables, so we use \$app_name (not \${app_name})
-    local latest_version=\$(gh api repos/\${k8s_repo}/git/refs/tags --jq ".[].ref" 2>/dev/null | \\
-        grep -E "refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-\$app_name-\$env_suffix\$" | \\
-        sed "s|refs/tags/v||" | \\
-        sed "s/-\$app_name-\$env_suffix\$//" | \\
-        sort -V -t. -k1,1n -k2,2n -k3,3n | \\
-        tail -1)
     
     if [ -z "\$latest_version" ] || [ "\$latest_version" = "" ]; then
         echo "1.0.0"
@@ -1490,7 +1627,7 @@ prompt_version() {
 # Monitor deployment workflow by run ID
 monitor_deployment_by_id() {
     local run_id="\$1"
-    local source_repo="${SOURCE_REPO}"
+    local source_repo="\${SOURCE_REPO}"
     
     if [ -z "\$run_id" ]; then
         print_warning "No run ID provided for monitoring"
@@ -1532,78 +1669,33 @@ monitor_deployment_by_id() {
         return 0
     fi
     
-    # Show real-time progress by polling instead of using watch (which buffers)
+    # Use gh run watch for real-time output
     echo ""
-    print_info "Workflow started! Showing real-time progress..."
+    print_info "Watching workflow run (press Ctrl+C to stop watching, workflow will continue)..."
     echo ""
     
-    local last_jobs_json=""
-    local exit_code=0
-    local iteration=0
-    
-    while true; do
-        # Get current workflow status and jobs
-        local status_json=\$(gh run view "\$run_id" --repo "\$source_repo" --json status,conclusion,displayTitle,jobs 2>/dev/null)
-        
-        if [ -z "\$status_json" ]; then
-            print_warning "Could not fetch workflow status"
-            break
-        fi
-        
-        local current_status=\$(echo "\$status_json" | jq -r '.status')
-        local current_conclusion=\$(echo "\$status_json" | jq -r '.conclusion // "none"')
-        local current_jobs=\$(echo "\$status_json" | jq -c '.jobs[]' 2>/dev/null)
-        
-        # Show job progress updates when they change
-        local current_jobs_display=\$(echo "\$status_json" | jq -r '.jobs[] | "\(.name): \(.status)\(if .conclusion then " (\(.conclusion))" else "" end)"' 2>/dev/null | sort)
-        
-        if [ "\$current_jobs_display" != "\$last_jobs_json" ]; then
-            # Show updated status
-            echo ""
-            echo "\$current_jobs_display" | while IFS= read -r job_line; do
-                if [ -n "\$job_line" ]; then
-                    # Color code based on status
-                    if echo "\$job_line" | grep -q "completed (success)"; then
-                        echo -e "  \${GREEN}✓\${NC} \$job_line"
-                    elif echo "\$job_line" | grep -q "completed (failure)"; then
-                        echo -e "  \${RED}✗\${NC} \$job_line"
-                    elif echo "\$job_line" | grep -q "in_progress"; then
-                        echo -e "  \${YELLOW}→\${NC} \$job_line"
-                    elif echo "\$job_line" | grep -q "queued"; then
-                        echo -e "  \${BLUE}○\${NC} \$job_line"
-                    else
-                        echo "  \$job_line"
-                    fi
-                fi
-            done
-            last_jobs_json="\$current_jobs_display"
-        fi
-        
-        # Check if workflow is done
-        if [ "\$current_status" = "completed" ]; then
-            echo ""
-            if [ "\$current_conclusion" = "success" ]; then
-                exit_code=0
-            else
-                exit_code=1
-            fi
-            break
-        fi
-        
-        iteration=\$((iteration + 1))
-        sleep 2
-    done
+    # Run gh watch and capture exit code
+    local watch_exit_code=0
+    if ! gh run watch "\$run_id" --repo "\$source_repo" --exit-status; then
+        watch_exit_code=\$?
+    fi
     
     echo ""
-    if [ \$exit_code -eq 0 ]; then
+    
+    # Get final status
+    local final_status
+    final_status=\$(gh run view "\$run_id" --repo "\$source_repo" --json status,conclusion --jq -r 'if .status == "completed" then .conclusion else .status end' 2>/dev/null || echo "unknown")
+    
+    if [ "\$watch_exit_code" -eq 0 ] || [ "\$final_status" = "success" ]; then
         print_success "Deployment completed successfully!"
         echo ""
         print_info "View workflow run: \$run_url"
+        return 0
     else
-        print_error "Deployment failed with exit code \$exit_code"
+        print_error "Deployment failed"
         echo ""
         print_info "View workflow run: \$run_url"
-        exit \$exit_code
+        return 1
     fi
 }
 
@@ -1636,12 +1728,31 @@ inject_workflow_if_missing() {
     local default_branch
     default_branch=\$(gh api "repos/\${source_repo}" --jq -r '.default_branch' 2>/dev/null || echo "main")
     
-    # Get the latest commit SHA for the default branch
-    local latest_sha
-    latest_sha=\$(gh api "repos/\${source_repo}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null)
+    # Try to get commit SHA from default branch first, then try the other branch
+    local latest_sha=""
+    local branch_to_use=""
     
-    if [ -z "\$latest_sha" ]; then
-        print_warning "Could not get latest commit SHA. Repository may be empty."
+    # Try default branch first
+    latest_sha=\$(gh api "repos/\${source_repo}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null || echo "")
+    
+    if [ -n "\$latest_sha" ] && [ "\$latest_sha" != "null" ]; then
+        branch_to_use="\${default_branch}"
+    else
+        # Try the other branch (main if default is master, master if default is main)
+        local other_branch="main"
+        if [ "\${default_branch}" = "main" ]; then
+            other_branch="master"
+        fi
+        
+        latest_sha=\$(gh api "repos/\${source_repo}/git/ref/heads/\${other_branch}" --jq -r '.object.sha' 2>/dev/null || echo "")
+        
+        if [ -n "\$latest_sha" ] && [ "\$latest_sha" != "null" ]; then
+            branch_to_use="\${other_branch}"
+        fi
+    fi
+    
+    if [ -z "\$latest_sha" ] || [ "\$latest_sha" = "null" ] || [ -z "\$branch_to_use" ]; then
+        print_warning "Could not get latest commit SHA from main or master branch. Repository may be empty."
         print_info "You may need to create an initial commit first."
         return 1
     fi
@@ -1654,7 +1765,7 @@ inject_workflow_if_missing() {
         -X PUT \\
         -f message="chore: add CI/CD deployment workflow" \\
         -f content="\$workflow_b64" \\
-        -f branch="\${default_branch}" \\
+        -f branch="\${branch_to_use}" \\
         -f sha="\$latest_sha" &>/dev/null; then
         print_success "Workflow injected successfully into \${source_repo}"
         return 0
@@ -1690,30 +1801,102 @@ main() {
     # Inject workflow if missing
     inject_workflow_if_missing
     
-    # Get default branch for source repo
-    local default_branch
-    default_branch=\$(gh api "repos/${SOURCE_REPO}" --jq -r '.default_branch' 2>/dev/null || echo "main")
-    
-    # Get the latest commit SHA for the default branch
-    print_info "Getting latest commit from \${default_branch} branch..."
-    local latest_sha
-    latest_sha=\$(gh api "repos/${SOURCE_REPO}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null)
-    
-    if [ -z "\$latest_sha" ]; then
-        print_error "Could not get latest commit SHA. Repository may be empty or inaccessible."
+    # Verify repository exists and is accessible
+    print_info "Verifying repository \${SOURCE_REPO}..."
+    if ! gh repo view "\${SOURCE_REPO}" &>/dev/null; then
+        print_error "Repository \${SOURCE_REPO} not found or not accessible."
+        print_info "Please ensure:"
+        echo "  1. The repository exists: \${SOURCE_REPO}"
+        echo "  2. You have access to the repository"
+        echo "  3. You are authenticated with GitHub CLI: gh auth status"
         exit 1
     fi
     
+    # Get default branch for source repo
+    local default_branch=""
+    local api_response
+    api_response=\$(gh api "repos/\${SOURCE_REPO}" 2>/dev/null || echo "")
+    
+    # Try to extract default branch using jq if available, otherwise use gh api with --jq
+    if command -v jq &>/dev/null && [ -n "\$api_response" ]; then
+        default_branch=\$(echo "\$api_response" | jq -r '.default_branch // ""' 2>/dev/null || echo "")
+    elif [ -n "\$api_response" ]; then
+        # Fallback: try to extract with grep/sed if jq not available
+        default_branch=\$(echo "\$api_response" | grep -o '"default_branch"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"default_branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "")
+    fi
+    
+    # If we still don't have default branch, try API with --jq flag
+    if [ -z "\$default_branch" ]; then
+        default_branch=\$(gh api "repos/\${SOURCE_REPO}" --jq -r '.default_branch' 2>/dev/null || echo "")
+    fi
+    
+    # Try to get commit SHA from available branches (try default first, then both)
+    local latest_sha=""
+    local branch_to_use=""
+    
+    # Try branches in order: default branch (if known), then main, then master
+    local branches_to_try=""
+    if [ -n "\$default_branch" ]; then
+        branches_to_try="\${default_branch} main master"
+        print_info "Default branch: \${default_branch}"
+    else
+        branches_to_try="main master"
+        print_info "Could not determine default branch, trying main and master..."
+    fi
+    
+    for branch in \$branches_to_try; do
+        # Skip if we already found a branch
+        if [ -n "\$branch_to_use" ]; then
+            break
+        fi
+        
+        print_info "Trying \${branch} branch..."
+        
+        # Try to get commit SHA
+        local branch_response
+        branch_response=\$(gh api "repos/\${SOURCE_REPO}/git/ref/heads/\${branch}" 2>/dev/null || echo "")
+        
+        if [ -n "\$branch_response" ]; then
+            if command -v jq &>/dev/null; then
+                latest_sha=\$(echo "\$branch_response" | jq -r '.object.sha // ""' 2>/dev/null || echo "")
+            else
+                # Fallback: try with --jq flag
+                latest_sha=\$(gh api "repos/\${SOURCE_REPO}/git/ref/heads/\${branch}" --jq -r '.object.sha' 2>/dev/null || echo "")
+            fi
+            
+            if [ -n "\$latest_sha" ] && [ "\$latest_sha" != "null" ] && [ "\$latest_sha" != "" ]; then
+                branch_to_use="\${branch}"
+                print_success "Found commit on \${branch} branch: \${latest_sha:0:7}..."
+                break
+            fi
+        fi
+    done
+    
+    if [ -z "\$latest_sha" ] || [ "\$latest_sha" = "null" ] || [ -z "\$branch_to_use" ]; then
+        print_error "Could not get latest commit SHA from main or master branch."
+        print_info "The repository exists but both branches may be empty."
+        print_info "Please create an initial commit:"
+        echo "  cd <your-repo-directory>"
+        echo "  git init"
+        echo "  git commit --allow-empty -m \"Initial commit\""
+        echo "  git branch -M main"
+        echo "  git remote add origin https://github.com/\${SOURCE_REPO}.git"
+        echo "  git push -u origin main"
+        exit 1
+    fi
+    
+    print_success "Found commit on \${branch_to_use} branch: \${latest_sha:0:7}..."
+    
     # Create tag in source repo (this triggers the workflow)
-    print_info "Creating tag \${TAG} in ${SOURCE_REPO}..."
-    if gh api "repos/${SOURCE_REPO}/git/refs" \\
+    print_info "Creating tag \${TAG} in \${SOURCE_REPO}..."
+    if gh api "repos/\${SOURCE_REPO}/git/refs" \\
         -X POST \\
         -f ref="refs/tags/\${TAG}" \\
         -f sha="\$latest_sha" &>/dev/null; then
         print_success "Tag \${TAG} created successfully"
     else
         # Tag might already exist, try to update it
-        if gh api "repos/${SOURCE_REPO}/git/refs/tags/\${TAG}" \\
+        if gh api "repos/\${SOURCE_REPO}/git/refs/tags/\${TAG}" \\
             -X PATCH \\
             -f sha="\$latest_sha" &>/dev/null; then
             print_success "Tag \${TAG} updated successfully"
@@ -1728,17 +1911,17 @@ main() {
     
     # Get the latest workflow run ID from source repo
     local run_id
-    run_id=\$(gh run list --repo "${SOURCE_REPO}" --workflow="deploy.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    run_id=\$(gh run list --repo "\${SOURCE_REPO}" --workflow="deploy.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
     
     if [ -n "\$run_id" ] && [ "\$run_id" != "null" ]; then
-        local run_url="https://github.com/${SOURCE_REPO}/actions/runs/\$run_id"
+        local run_url="https://github.com/\${SOURCE_REPO}/actions/runs/\$run_id"
         print_success "Workflow triggered successfully"
         print_info "Workflow run ID: \$run_id"
         print_info "Workflow run URL: \$run_url"
     else
         print_warning "Could not get workflow run ID immediately"
         print_info "The workflow may still be starting. Check workflow runs manually:"
-        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
+        echo "  gh run list --repo \${SOURCE_REPO} --workflow=deploy.yml"
         # Set run_id to empty so monitoring is skipped
         run_id=""
     fi
@@ -1751,7 +1934,7 @@ main() {
     else
         print_warning "Could not extract workflow run ID from output"
         print_info "You can monitor manually:"
-        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
+        echo "  gh run list --repo \${SOURCE_REPO} --workflow=deploy.yml"
     fi
 }
 
