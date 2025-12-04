@@ -824,14 +824,14 @@ EOF
 # Deploy Script for ${APP_NAME}
 # ============================================================================
 # This script helps you deploy ${APP_NAME} by prompting for version and environment.
-# It calls the deployment workflow in the k8s repository.
+# It uses the CI/CD workflow in the source repository (triggered by tag push).
 #
 # Usage:
 #   ./deploy.sh
 #
 # Requirements:
 #   - GitHub CLI (gh) installed and authenticated
-#   - Access to the k8s repository
+#   - Access to the source repository
 # ============================================================================
 
 set -e
@@ -955,60 +955,70 @@ main() {
     echo "  Source Repo: ${SOURCE_REPO}"
     echo ""
     
-    # Determine k8s repo based on environment
-    local k8s_repo="\${GITHUB_ORG}/k8s-production"
-    if [ "\${ENV_SUFFIX}" = "staging" ]; then
-        k8s_repo="\${GITHUB_ORG}/k8s-staging"
-    fi
+    # Inject workflow if missing
+    inject_workflow_if_missing
     
-    # Trigger workflow via workflow_dispatch
-    print_info "Triggering deployment workflow..."
-    echo ""
+    # Get default branch for source repo
+    local default_branch
+    default_branch=\$(gh api "repos/${SOURCE_REPO}" --jq -r '.default_branch' 2>/dev/null || echo "main")
     
-    if ! gh workflow run "deploy-from-tag.yml" \\
-        --repo "\$k8s_repo" \\
-        -f service_name="${APP_NAME}" \\
-        -f tag="\${TAG}" \\
-        -f source_repo="\${SOURCE_REPO}" 2>&1; then
-        print_error "Failed to trigger workflow"
+    # Get the latest commit SHA for the default branch
+    print_info "Getting latest commit from \${default_branch} branch..."
+    local latest_sha
+    latest_sha=\$(gh api "repos/${SOURCE_REPO}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null)
+    
+    if [ -z "\$latest_sha" ]; then
+        print_error "Could not get latest commit SHA. Repository may be empty or inaccessible."
         exit 1
     fi
     
-    print_success "Workflow triggered successfully"
-    
-    # Create version tracking tag (for version detection, doesn't trigger workflow)
-    print_info "Creating version tracking tag \${K8S_TAG} on \$k8s_repo..."
-    local main_sha=\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha 2>/dev/null)
-    if [ -n "\$main_sha" ]; then
-        if ! gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} --jq .ref >/dev/null 2>&1; then
-            # Tag doesn't exist, create it
-            gh api repos/\${k8s_repo}/git/refs -X POST -f ref="refs/tags/\${K8S_TAG}" -f sha="\$main_sha" >/dev/null 2>&1 && \\
-                print_success "Version tracking tag \${K8S_TAG} created" || \\
-                print_warning "Failed to create version tracking tag (non-critical)"
+    # Create tag in source repo (this triggers the workflow)
+    print_info "Creating tag \${TAG} in ${SOURCE_REPO}..."
+    if gh api "repos/${SOURCE_REPO}/git/refs" \\
+        -X POST \\
+        -f ref="refs/tags/\${TAG}" \\
+        -f sha="\$latest_sha" &>/dev/null; then
+        print_success "Tag \${TAG} created successfully"
+    else
+        # Tag might already exist, try to update it
+        if gh api "repos/${SOURCE_REPO}/git/refs/tags/\${TAG}" \\
+            -X PATCH \\
+            -f sha="\$latest_sha" &>/dev/null; then
+            print_success "Tag \${TAG} updated successfully"
         else
-            # Tag exists, update it
-            gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} -X PATCH -f sha="\$main_sha" >/dev/null 2>&1 && \\
-                print_success "Version tracking tag \${K8S_TAG} updated" || \\
-                print_warning "Failed to update version tracking tag (non-critical)"
+            print_error "Failed to create/update tag \${TAG}"
+            exit 1
         fi
     fi
     
-    # Wait a moment for the workflow to be created
-    sleep 2
+    # Wait a moment for the workflow to be triggered
+    sleep 3
     
-    # Get the latest workflow run ID
-    local run_id=\$(gh run list --repo "\$k8s_repo" --workflow="deploy-from-tag.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    # Get the latest workflow run ID from source repo
+    local run_id
+    run_id=\$(gh run list --repo "${SOURCE_REPO}" --workflow="deploy.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
     
     if [ -n "\$run_id" ] && [ "\$run_id" != "null" ]; then
-        local run_url="https://github.com/\$k8s_repo/actions/runs/\$run_id"
+        local run_url="https://github.com/${SOURCE_REPO}/actions/runs/\$run_id"
         print_success "Workflow triggered successfully"
         print_info "Workflow run ID: \$run_id"
         print_info "Workflow run URL: \$run_url"
     else
         print_warning "Could not get workflow run ID immediately"
         print_info "The workflow may still be starting. Check workflow runs manually:"
-        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
         run_id=""
+    fi
+    
+    echo ""
+    
+    # Monitor the deployment if we found a run ID
+    if [ -n "\$run_id" ]; then
+        monitor_deployment_by_id "\$run_id"
+    else
+        print_warning "Could not extract workflow run ID from output"
+        print_info "You can monitor manually:"
+        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
     fi
 }
 
@@ -1153,6 +1163,70 @@ commit_and_push() {
     fi
 }
 
+# Inject CI/CD workflow into source repo if missing
+inject_workflow_if_missing() {
+    local source_repo="${GITHUB_ORG}/${APP_NAME}"
+    local workflow_path=".github/workflows/deploy.yml"
+    
+    print_info "Checking for CI/CD workflow in ${source_repo}..."
+    
+    # Check if workflow already exists
+    if gh api "repos/${source_repo}/contents/${workflow_path}" &>/dev/null; then
+        print_success "Workflow already exists in ${source_repo}"
+        return 0
+    fi
+    
+    print_info "Workflow not found. Injecting CI/CD workflow..."
+    
+    # Get the workflow content from app-manager-script repo
+    local workflow_content
+    workflow_content=$(gh api "repos/${GITHUB_ORG}/app-manager-script/contents/.github/workflows/deploy.yml" --jq -r '.content' 2>/dev/null | base64 -d 2>/dev/null)
+    
+    if [ -z "$workflow_content" ]; then
+        # Fallback: read from local file if available
+        local script_dir
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [ -f "${script_dir}/.github/workflows/deploy.yml" ]; then
+            workflow_content=$(cat "${script_dir}/.github/workflows/deploy.yml")
+        else
+            print_warning "Could not fetch workflow content. You may need to add it manually."
+            return 1
+        fi
+    fi
+    
+    # Get default branch (main or master)
+    local default_branch
+    default_branch=$(gh api "repos/${source_repo}" --jq -r '.default_branch' 2>/dev/null || echo "main")
+    
+    # Get the latest commit SHA for the default branch
+    local latest_sha
+    latest_sha=$(gh api "repos/${source_repo}/git/ref/heads/${default_branch}" --jq -r '.object.sha' 2>/dev/null)
+    
+    if [ -z "$latest_sha" ]; then
+        print_warning "Could not get latest commit SHA. Repository may be empty."
+        print_info "You may need to create an initial commit first."
+        return 1
+    fi
+    
+    # Create workflow file via GitHub API
+    local workflow_b64
+    workflow_b64=$(echo -n "$workflow_content" | base64)
+    
+    if gh api "repos/${source_repo}/contents/${workflow_path}" \
+        -X PUT \
+        -f message="chore: add CI/CD deployment workflow" \
+        -f content="$workflow_b64" \
+        -f branch="$default_branch" \
+        -f sha="$latest_sha" &>/dev/null; then
+        print_success "Workflow injected successfully into ${source_repo}"
+        return 0
+    else
+        print_warning "Failed to inject workflow. You may need to add it manually."
+        print_info "Workflow location: ${source_repo}/.github/workflows/deploy.yml"
+        return 1
+    fi
+}
+
 # Write deploy.sh script to local filesystem
 write_deploy_script() {
     local deploy_script_path="${APP_NAME}-deploy.sh"
@@ -1166,14 +1240,14 @@ write_deploy_script() {
 # Deploy Script for ${APP_NAME}
 # ============================================================================
 # This script helps you deploy ${APP_NAME} by prompting for version and environment.
-# It calls the deployment workflow in the k8s repository.
+# It uses the CI/CD workflow in the source repository (triggered by tag push).
 #
 # Usage:
 #   ./${deploy_script_path}
 #
 # Requirements:
 #   - GitHub CLI (gh) installed and authenticated
-#   - Access to the k8s repository
+#   - Access to the source repository
 # ============================================================================
 
 set -e
@@ -1372,21 +1446,14 @@ prompt_version() {
 # Monitor deployment workflow by run ID
 monitor_deployment_by_id() {
     local run_id="\$1"
-    local env_suffix="\${ENV_SUFFIX}"
-    
-    # Determine k8s repo based on environment
-    if [ "\$env_suffix" = "staging" ]; then
-        local k8s_repo="\${GITHUB_ORG}/k8s-staging"
-    else
-        local k8s_repo="\${GITHUB_ORG}/k8s-production"
-    fi
+    local source_repo="${SOURCE_REPO}"
     
     if [ -z "\$run_id" ]; then
         print_warning "No run ID provided for monitoring"
         return 0
     fi
     
-    local run_url="https://github.com/\$k8s_repo/actions/runs/\$run_id"
+    local run_url="https://github.com/\${source_repo}/actions/runs/\$run_id"
     print_info "Monitoring workflow run #\${run_id}"
     print_info "Workflow run URL: \$run_url"
     echo ""
@@ -1398,7 +1465,7 @@ monitor_deployment_by_id() {
     local run_exists=false
     
     while [ \$attempt -lt \$max_attempts ]; do
-        if gh run view "\$run_id" --repo "\$k8s_repo" &>/dev/null; then
+        if gh run view "\$run_id" --repo "\$source_repo" &>/dev/null; then
             run_exists=true
             break
         fi
@@ -1416,7 +1483,7 @@ monitor_deployment_by_id() {
         echo "  - The run ID is incorrect"
         echo ""
         print_info "You can check manually:"
-        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        echo "  gh run list --repo \$source_repo --workflow=deploy.yml"
         echo "  Or visit: \$run_url"
         return 0
     fi
@@ -1432,7 +1499,7 @@ monitor_deployment_by_id() {
     
     while true; do
         # Get current workflow status and jobs
-        local status_json=\$(gh run view "\$run_id" --repo "\$k8s_repo" --json status,conclusion,displayTitle,jobs 2>/dev/null)
+        local status_json=\$(gh run view "\$run_id" --repo "\$source_repo" --json status,conclusion,displayTitle,jobs 2>/dev/null)
         
         if [ -z "\$status_json" ]; then
             print_warning "Could not fetch workflow status"
@@ -1496,6 +1563,64 @@ monitor_deployment_by_id() {
     fi
 }
 
+# Inject CI/CD workflow into source repo if missing
+inject_workflow_if_missing() {
+    local source_repo="\${SOURCE_REPO}"
+    local workflow_path=".github/workflows/deploy.yml"
+    
+    print_info "Checking for CI/CD workflow in \${source_repo}..."
+    
+    # Check if workflow already exists
+    if gh api "repos/\${source_repo}/contents/\${workflow_path}" &>/dev/null; then
+        print_success "Workflow already exists in \${source_repo}"
+        return 0
+    fi
+    
+    print_info "Workflow not found. Injecting CI/CD workflow..."
+    
+    # Get the workflow content from app-manager-script repo
+    local workflow_content
+    workflow_content=\$(gh api "repos/\${GITHUB_ORG}/app-manager-script/contents/.github/workflows/deploy.yml" --jq -r '.content' 2>/dev/null | base64 -d 2>/dev/null)
+    
+    if [ -z "\$workflow_content" ]; then
+        print_warning "Could not fetch workflow content. You may need to add it manually."
+        print_info "Workflow should be at: \${source_repo}/.github/workflows/deploy.yml"
+        return 1
+    fi
+    
+    # Get default branch (main or master)
+    local default_branch
+    default_branch=\$(gh api "repos/\${source_repo}" --jq -r '.default_branch' 2>/dev/null || echo "main")
+    
+    # Get the latest commit SHA for the default branch
+    local latest_sha
+    latest_sha=\$(gh api "repos/\${source_repo}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null)
+    
+    if [ -z "\$latest_sha" ]; then
+        print_warning "Could not get latest commit SHA. Repository may be empty."
+        print_info "You may need to create an initial commit first."
+        return 1
+    fi
+    
+    # Create workflow file via GitHub API
+    local workflow_b64
+    workflow_b64=\$(echo -n "\$workflow_content" | base64)
+    
+    if gh api "repos/\${source_repo}/contents/\${workflow_path}" \\
+        -X PUT \\
+        -f message="chore: add CI/CD deployment workflow" \\
+        -f content="\$workflow_b64" \\
+        -f branch="\${default_branch}" \\
+        -f sha="\$latest_sha" &>/dev/null; then
+        print_success "Workflow injected successfully into \${source_repo}"
+        return 0
+    else
+        print_warning "Failed to inject workflow. You may need to add it manually."
+        print_info "Workflow location: \${source_repo}/.github/workflows/deploy.yml"
+        return 1
+    fi
+}
+
 # Main execution
 main() {
     echo ""
@@ -1518,59 +1643,58 @@ main() {
     echo "  Source Repo: ${SOURCE_REPO}"
     echo ""
     
-    # Determine k8s repo based on environment
-    local k8s_repo="\${GITHUB_ORG}/k8s-production"
-    if [ "\${ENV_SUFFIX}" = "staging" ]; then
-        k8s_repo="\${GITHUB_ORG}/k8s-staging"
-    fi
+    # Inject workflow if missing
+    inject_workflow_if_missing
     
-    # Trigger workflow via workflow_dispatch
-    print_info "Triggering deployment workflow..."
-    echo ""
+    # Get default branch for source repo
+    local default_branch
+    default_branch=\$(gh api "repos/${SOURCE_REPO}" --jq -r '.default_branch' 2>/dev/null || echo "main")
     
-    if ! gh workflow run "deploy-from-tag.yml" \\
-        --repo "\$k8s_repo" \\
-        -f service_name="${APP_NAME}" \\
-        -f tag="\${TAG}" \\
-        -f source_repo="\${SOURCE_REPO}" 2>&1; then
-        print_error "Failed to trigger workflow"
+    # Get the latest commit SHA for the default branch
+    print_info "Getting latest commit from \${default_branch} branch..."
+    local latest_sha
+    latest_sha=\$(gh api "repos/${SOURCE_REPO}/git/ref/heads/\${default_branch}" --jq -r '.object.sha' 2>/dev/null)
+    
+    if [ -z "\$latest_sha" ]; then
+        print_error "Could not get latest commit SHA. Repository may be empty or inaccessible."
         exit 1
     fi
     
-    print_success "Workflow triggered successfully"
-    
-    # Create version tracking tag (for version detection, doesn't trigger workflow)
-    print_info "Creating version tracking tag \${K8S_TAG} on \$k8s_repo..."
-    local main_sha=\$(gh api repos/\${k8s_repo}/git/ref/heads/main --jq .object.sha 2>/dev/null)
-    if [ -n "\$main_sha" ]; then
-        if ! gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} --jq .ref >/dev/null 2>&1; then
-            # Tag doesn't exist, create it
-            gh api repos/\${k8s_repo}/git/refs -X POST -f ref="refs/tags/\${K8S_TAG}" -f sha="\$main_sha" >/dev/null 2>&1 && \\
-                print_success "Version tracking tag \${K8S_TAG} created" || \\
-                print_warning "Failed to create version tracking tag (non-critical)"
+    # Create tag in source repo (this triggers the workflow)
+    print_info "Creating tag \${TAG} in ${SOURCE_REPO}..."
+    if gh api "repos/${SOURCE_REPO}/git/refs" \\
+        -X POST \\
+        -f ref="refs/tags/\${TAG}" \\
+        -f sha="\$latest_sha" &>/dev/null; then
+        print_success "Tag \${TAG} created successfully"
+    else
+        # Tag might already exist, try to update it
+        if gh api "repos/${SOURCE_REPO}/git/refs/tags/\${TAG}" \\
+            -X PATCH \\
+            -f sha="\$latest_sha" &>/dev/null; then
+            print_success "Tag \${TAG} updated successfully"
         else
-            # Tag exists, update it
-            gh api repos/\${k8s_repo}/git/refs/tags/\${K8S_TAG} -X PATCH -f sha="\$main_sha" >/dev/null 2>&1 && \\
-                print_success "Version tracking tag \${K8S_TAG} updated" || \\
-                print_warning "Failed to update version tracking tag (non-critical)"
+            print_error "Failed to create/update tag \${TAG}"
+            exit 1
         fi
     fi
     
-    # Wait a moment for the workflow to be created
-    sleep 2
+    # Wait a moment for the workflow to be triggered
+    sleep 3
     
-    # Get the latest workflow run ID
-    local run_id=\$(gh run list --repo "\$k8s_repo" --workflow="deploy-from-tag.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    # Get the latest workflow run ID from source repo
+    local run_id
+    run_id=\$(gh run list --repo "${SOURCE_REPO}" --workflow="deploy.yml" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
     
     if [ -n "\$run_id" ] && [ "\$run_id" != "null" ]; then
-        local run_url="https://github.com/\$k8s_repo/actions/runs/\$run_id"
+        local run_url="https://github.com/${SOURCE_REPO}/actions/runs/\$run_id"
         print_success "Workflow triggered successfully"
         print_info "Workflow run ID: \$run_id"
         print_info "Workflow run URL: \$run_url"
     else
         print_warning "Could not get workflow run ID immediately"
         print_info "The workflow may still be starting. Check workflow runs manually:"
-        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
         # Set run_id to empty so monitoring is skipped
         run_id=""
     fi
@@ -1583,7 +1707,7 @@ main() {
     else
         print_warning "Could not extract workflow run ID from output"
         print_info "You can monitor manually:"
-        echo "  gh run list --repo \$k8s_repo --workflow=deploy-from-tag.yml"
+        echo "  gh run list --repo ${SOURCE_REPO} --workflow=deploy.yml"
     fi
 }
 
@@ -1700,19 +1824,17 @@ show_usage_info() {
     echo "   - Environment (production/staging)"
     echo "   - Version number (e.g., 1.0.0)"
     echo ""
-    echo "   Option 2: Trigger workflow manually"
-    echo "   ------------------------------------"
-    echo "   gh workflow run deploy-from-tag.yml \\"
-    echo "     --repo ${K8S_REPO} \\"
-    echo "     -f service_name=${APP_NAME} \\"
-    echo "     -f tag=v1.0.0-production \\"
-    echo "     -f source_repo=${GITHUB_ORG}/${APP_NAME}"
+    echo "   Option 2: Create tag manually (triggers workflow automatically)"
+    echo "   ---------------------------------------------------------------"
+    echo "   gh api repos/${GITHUB_ORG}/${APP_NAME}/git/refs -X POST \\"
+    echo "     -f ref=\"refs/tags/v1.0.0-staging\" \\"
+    echo "     -f sha=\"\$(gh api repos/${GITHUB_ORG}/${APP_NAME}/git/ref/heads/main --jq .object.sha)\""
     echo ""
     echo "📝 Kubernetes Manifests:"
     echo "   https://github.com/${K8S_REPO}/tree/main/apps/${APP_NAME}"
     echo ""
     echo "🔍 Monitor deployment:"
-    echo "   gh run list --repo ${K8S_REPO} --workflow=deploy-from-tag.yml"
+    echo "   gh run list --repo ${GITHUB_ORG}/${APP_NAME} --workflow=deploy.yml"
     echo ""
     echo "============================================================================="
 }
